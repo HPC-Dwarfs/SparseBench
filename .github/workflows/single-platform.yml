@@ -1,0 +1,38 @@
+name: Build and Run Unit Tests
+
+on:
+  push:
+    branches: [ "main", "dane_dev" ]
+  pull_request:
+    branches: [ "main", "dane_dev" ]
+
+jobs:
+  build_ICC_MPI:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Spack
+      uses: spack/actions/setup-spack
+      with:
+        spack-version: latest
+
+    - name: Install OpenMPI
+      run: |
+        spack concretize openmpi
+        spack install -j openmpi
+        spack load openmpi
+
+    - name: Configure GCC_MPI
+      run: |
+        sed -E -i \
+        -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
+        -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
+        -e 's/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1GCC/' \
+        Makefile
+
+    - name: Make GCC_MPI
+      run: |
+        make
+

@@ -23,7 +23,13 @@ MOD2_OBJECTS=${MOD2}/spmvSCS.o ${MOD2}/solverTests.o
 OBJECTS := $(shell echo $(MOD1_OBJECTS) $(MOD2_OBJECTS) | tr ' ' '\n' | sort -u | tr '\n' ' ')
 
 # Always leave debugging flag on
-CFLAGS=-g -qopenmp
+CFLAGS=-g
+
+# Only enable OpenMP if it defined in the parent config.mk
+ifeq ($(strip $(ENABLE_OPENMP)),true)
+CFLAGS += $(OPENMP)
+endif
+# If enabled, MPI wrappers are already in CC
 
 .PHONY: all clean
 
