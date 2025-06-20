@@ -24,7 +24,8 @@ jobs:
     - name: Install OpenMPI
       run: |
         spack install -j 4 openmpi
-        spack load openmpi
+        eval "$(spack load --sh openmpi)"
+        which mpicc
 
     - name: Configure GCC_MPI
       run: |
