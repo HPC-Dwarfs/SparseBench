@@ -82,7 +82,7 @@ jobs:
     - name: Install Clang compiler and OpenMPI
       run: |
         spack install -j 4 llvm
-        spack install -j 4 spack install -j 4 openmpi
+        spack install -j 4 openmpi
 
     - name: Configure and Make CLANG_MPI
       run: |
