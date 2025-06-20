@@ -13,15 +13,18 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Setup Spack
-      uses: spack/actions/setup-spack@main 
+    - name: Set up Spack
+      uses: spack/setup-spack@v2
       with:
-        spack-version: latest
+        ref: develop      # Spack version (examples: develop, releases/v0.23)
+        buildcache: true  # Configure oci://ghcr.io/spack/github-actions-buildcache
+        color: true       # Force color output (SPACK_COLOR=always)
+        path: spack       # Where to clone Spack
 
     - name: Install OpenMPI
       run: |
         spack concretize openmpi
-        spack install -j openmpi
+        spack install -j 4 openmpi
         spack load openmpi
 
     - name: Configure GCC_MPI
