@@ -24,11 +24,11 @@ jobs:
     - name: Install OpenMPI
       run: |
         spack install -j 4 openmpi
-        eval "$(spack load --sh openmpi)"
-        which mpicc
 
     - name: Configure and Make GCC_MPI
       run: |
+        . ./spack/share/spack/setup-env.sh # setup spack shell env
+        eval "$(spack load --sh openmpi)" # load into current shell
         sed -E -i \
         -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
         -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
