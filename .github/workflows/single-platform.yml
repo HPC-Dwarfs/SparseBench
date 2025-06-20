@@ -7,6 +7,34 @@ on:
     branches: [ "main", "dane_dev" ]
 
 jobs:
+  # build_GCC_MPI:
+  #   runs-on: ubuntu-latest
+
+  #   steps:
+  #   - uses: actions/checkout@v4
+
+  #   - name: Set up Spack
+  #     uses: spack/setup-spack@v2
+  #     with:
+  #       ref: develop      # Spack version (examples: develop, releases/v0.23)
+  #       buildcache: true  # Configure oci://ghcr.io/spack/github-actions-buildcache
+  #       color: true       # Force color output (SPACK_COLOR=always)
+  #       path: spack       # Where to clone Spack
+
+  #   - name: Install OpenMPI
+  #     run: |
+  #       spack install -j 4 openmpi
+
+  #   - name: Configure and Make GCC_MPI
+  #     run: |
+  #       . ./spack/share/spack/setup-env.sh # setup spack shell env
+  #       eval "$(spack load --sh openmpi)" # load into current shell
+  #       sed -E -i \
+  #       -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
+  #       -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
+  #       -e 's/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1GCC/' config.mk
+  #       make
+
   build_ICC_MPI:
     runs-on: ubuntu-latest
 
@@ -21,17 +49,19 @@ jobs:
         color: true       # Force color output (SPACK_COLOR=always)
         path: spack       # Where to clone Spack
 
-    - name: Install OpenMPI
+    - name: Install Intel compiler/MPI
       run: |
-        spack install -j 4 openmpi
+        spack install -j 4 intel-oneapi-compilers
+        spack install -j 4 intel-oneapi-mpi
 
-    - name: Configure and Make GCC_MPI
+    - name: Configure and Make ICC_MPI
       run: |
-        . ./spack/share/spack/setup-env.sh # setup spack shell env
-        eval "$(spack load --sh openmpi)" # load into current shell
+        . ./spack/share/spack/setup-env.sh
+        eval "$(spack load --sh intel-oneapi-compilers)"
+        eval "$(spack load --sh intel-oneapi-mpi)"
         sed -E -i \
         -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
         -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
-        -e 's/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1GCC/' config.mk
+        -e 's/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1ICC/' config.mk
         make
 
