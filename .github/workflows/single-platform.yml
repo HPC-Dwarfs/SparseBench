@@ -27,15 +27,11 @@ jobs:
         eval "$(spack load --sh openmpi)"
         which mpicc
 
-    - name: Configure GCC_MPI
+    - name: Configure and Make GCC_MPI
       run: |
         sed -E -i \
         -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
         -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
-        -e 's/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1GCC/' \
-        Makefile
-
-    - name: Make GCC_MPI
-      run: |
+        -e 's/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1GCC/' config.mk
         make
 
