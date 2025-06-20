@@ -7,66 +7,11 @@ on:
     branches: [ "main", "dane_dev" ]
 
 jobs:
-  # build_GCC_MPI:
-  #   runs-on: ubuntu-latest
-
-  #   steps:
-  #   - uses: actions/checkout@v4
-
-  #   - name: Set up Spack
-  #     uses: spack/setup-spack@v2
-  #     with:
-  #       ref: develop      # Spack version (examples: develop, releases/v0.23)
-  #       buildcache: true  # Configure oci://ghcr.io/spack/github-actions-buildcache
-  #       color: true       # Force color output (SPACK_COLOR=always)
-  #       path: spack       # Where to clone Spack
-
-  #   - name: Install OpenMPI
-  #     run: |
-  #       spack install -j 4 openmpi
-
-  #   - name: Configure and Make GCC_MPI
-  #     run: |
-  #       . ./spack/share/spack/setup-env.sh # setup spack shell env
-  #       eval "$(spack load --sh openmpi)" # load into current shell
-  #       sed -E -i \
-  #       -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
-  #       -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
-  #       -e 's/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1GCC/' config.mk
-  #       make
-
-  # build_ICC_MPI:
-  #   runs-on: ubuntu-latest
-
-  #   steps:
-  #   - uses: actions/checkout@v4
-
-  #   - name: Set up Spack
-  #     uses: spack/setup-spack@v2
-  #     with:
-  #       ref: develop      # Spack version (examples: develop, releases/v0.23)
-  #       buildcache: true  # Configure oci://ghcr.io/spack/github-actions-buildcache
-  #       color: true       # Force color output (SPACK_COLOR=always)
-  #       path: spack       # Where to clone Spack
-
-  #   - name: Install Intel compiler/MPI
-  #     run: |
-  #       spack install -j 4 intel-oneapi-compilers
-  #       spack install -j 4 intel-oneapi-mpi
-
-  #   - name: Configure and Make ICC_MPI
-  #     run: |
-  #       . ./spack/share/spack/setup-env.sh
-  #       eval "$(spack load --sh intel-oneapi-compilers)"
-  #       eval "$(spack load --sh intel-oneapi-mpi)"
-  #       sed -E -i \
-  #       -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
-  #       -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
-  #       -e 's/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1ICC/' config.mk
-  #       make
-
-  build_CLANG_MPI:
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [GCC, ICC, CLANG]
 
     steps:
     - uses: actions/checkout@v4
@@ -74,23 +19,45 @@ jobs:
     - name: Set up Spack
       uses: spack/setup-spack@v2
       with:
-        ref: develop      # Spack version (examples: develop, releases/v0.23)
-        buildcache: true  # Configure oci://ghcr.io/spack/github-actions-buildcache
-        color: true       # Force color output (SPACK_COLOR=always)
-        path: spack       # Where to clone Spack
+        ref: develop
+        buildcache: true
+        color: true
+        path: spack
 
-    - name: Install Clang compiler and OpenMPI
-      run: |
-        spack install -j 4 llvm
-        spack install -j 4 openmpi
-
-    - name: Configure and Make CLANG_MPI
+    - name: Install Compiler and MPI
       run: |
         . ./spack/share/spack/setup-env.sh
-        eval "$(spack load --sh llvm)"
-        eval "$(spack load --sh openmpi)"
+
+        if [[ "${{ matrix.compiler }}" == "GCC" ]]; then
+          spack install -j 4 openmpi
+        elif [[ "${{ matrix.compiler }}" == "ICC" ]]; then
+          spack install -j 4 intel-oneapi-compilers
+          spack install -j 4 intel-oneapi-mpi
+        elif [[ "${{ matrix.compiler }}" == "CLANG" ]]; then
+          spack install -j 4 llvm
+          spack install -j 4 openmpi
+        fi
+
+    - name: Configure and Make
+      run: |
+        . ./spack/share/spack/setup-env.sh
+
+        if [[ "${{ matrix.compiler }}" == "GCC" ]]; then
+          eval "$(spack load --sh openmpi)"
+        elif [[ "${{ matrix.compiler }}" == "ICC" ]]; then
+          eval "$(spack load --sh intel-oneapi-compilers)"
+          eval "$(spack load --sh intel-oneapi-mpi)"
+        elif [[ "${{ matrix.compiler }}" == "CLANG" ]]; then
+          eval "$(spack load --sh llvm)"
+          eval "$(spack load --sh openmpi)"
+        fi
+
+        TOOLCHAIN="${{ matrix.compiler }}"
+
         sed -E -i \
-        -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
-        -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
-        -e 's/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1CLANG/' config.mk
+          -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
+          -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
+          -e "s/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1${TOOLCHAIN}/" \
+          config.mk
+
         make
