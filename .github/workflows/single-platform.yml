@@ -23,7 +23,6 @@ jobs:
 
     - name: Install OpenMPI
       run: |
-        spack concretize openmpi
         spack install -j 4 openmpi
         spack load openmpi
 
