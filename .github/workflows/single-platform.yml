@@ -41,7 +41,7 @@ jobs:
     - name: Configure and Make
       run: |
         . ./spack/share/spack/setup-env.sh
-
+        
         if [[ "${{ matrix.compiler }}" == "GCC" ]]; then
           eval "$(spack load --sh openmpi)"
         elif [[ "${{ matrix.compiler }}" == "ICC" ]]; then
@@ -85,6 +85,28 @@ jobs:
       with:
         name: sparseBench-SCS-${{ matrix.compiler }}
         path: ./executables
+
+    - name: Set up Spack
+      uses: spack/setup-spack@v2
+      with:
+        ref: develop
+        buildcache: true
+        color: true
+        path: spack
+
+    - name: Load Compiler and MPI
+      run: |
+        . ./spack/share/spack/setup-env.sh
+
+        if [[ "${{ matrix.compiler }}" == "GCC" ]]; then
+          eval "$(spack load --sh openmpi)"
+        elif [[ "${{ matrix.compiler }}" == "ICC" ]]; then
+          eval "$(spack load --sh intel-oneapi-compilers)"
+          eval "$(spack load --sh intel-oneapi-mpi)"
+        elif [[ "${{ matrix.compiler }}" == "CLANG" ]]; then
+          eval "$(spack load --sh llvm)"
+          eval "$(spack load --sh openmpi)"
+        fi
 
     - name: Make Tests
       run: |
