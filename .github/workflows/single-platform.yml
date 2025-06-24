@@ -57,7 +57,7 @@ jobs:
         sed -E -i \
           -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
           -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
-          -e 's/^(MTX_FMT[[:space:]]*\?=[[:space:]]*).*/\SCS/' \
+          -e 's/^(MTX_FMT[[:space:]]*\?=[[:space:]]*).*/\1SCS/' \
           -e "s/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1${TOOLCHAIN}/" \
           config.mk
 
