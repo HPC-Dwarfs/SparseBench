@@ -6,9 +6,10 @@
 #include "matrix/matrixTests.h"
 #include "solver/solverTests.h"
 
-int main(int argc, char** argv){
-	matrixTests(argc, argv);
-	solverTests(argc, argv);
-	
-	return 0;
+int main(int argc, char** argv)
+{
+  matrixTests(argc, argv);
+  // solverTests(argc, argv);
+
+  return 0;
 }

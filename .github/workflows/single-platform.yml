@@ -57,7 +57,44 @@ jobs:
         sed -E -i \
           -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
           -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
+          -e 's/^(MTX_FMT[[:space:]]*\?=[[:space:]]*).*/\SCS/' \
           -e "s/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1${TOOLCHAIN}/" \
           config.mk
 
         make
+
+    - name: List exes after build
+      run: |
+        echo "Current directory: $(pwd)"
+        echo "Contents:"
+        find . -type f -executable
+
+    - name: Upload Executables
+      uses: actions/upload-artifact@v4
+      with:
+        name: executable-${{ matrix.compiler }}
+        path: |
+          $(pwd)/sparseBench-SCS-${{ matrix.compiler }}
+
+  # runTests:
+  #   runs-on: ubuntu-latest
+  #   needs: build
+  #   strategy:
+  #     matrix:
+  #       compiler: [GCC, ICC, CLANG]
+
+  #   steps:
+  #   - uses: actions/checkout@v4
+
+  #   - name: Download Executables
+  #     uses: actions/download-artifact@v4
+  #     with:
+  #       name: executable-${{ matrix.compiler }}
+  #       path: ./executables
+
+  #   - name: Run Tests
+  #     run: |
+  #       chmod +x ./executables/*
+  #       ./executables/executable1 --test
+  #       ./executables/executable2 --test
+  #       ./executables/executable3 --test

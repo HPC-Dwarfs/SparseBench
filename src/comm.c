@@ -753,53 +753,54 @@ void commMatrixDump(Comm* c, Matrix* m)
   }
 #endif /* ifdef CRS */
 #ifdef SCS
-  printf("m->startRow = %d\n", m->startRow);
-  printf("m->stopRow = %d\n", m->stopRow);
-  printf("m->totalNr = %d\n", m->totalNr);
-  printf("m->totalNnz = %d\n", m->totalNnz);
-  printf("m->nr = %d\n", m->nr);
-  printf("m->nc = %d\n", m->nc);
-  printf("m->nnz = %d\n", m->nnz);
-  printf("m->C = %d\n", m->C);
-  printf("m->sigma = %d\n", m->sigma);
-  printf("m->nChunks = %d\n", m->nChunks);
-  printf("m->nrPadded = %d\n", m->nrPadded);
+  fprintf(c->logFile, "m->startRow = %d\n", m->startRow);
+  fprintf(c->logFile, "m->stopRow = %d\n", m->stopRow);
+  fprintf(c->logFile, "m->totalNr = %d\n", m->totalNr);
+  fprintf(c->logFile, "m->totalNnz = %d\n", m->totalNnz);
+  fprintf(c->logFile, "m->nr = %d\n", m->nr);
+  fprintf(c->logFile, "m->nc = %d\n", m->nc);
+  fprintf(c->logFile, "m->nnz = %d\n", m->nnz);
+  fprintf(c->logFile, "m->C = %d\n", m->C);
+  fprintf(c->logFile, "m->sigma = %d\n", m->sigma);
+  fprintf(c->logFile, "m->nChunks = %d\n", m->nChunks);
+  fprintf(c->logFile, "m->nrPadded = %d\n", m->nrPadded);
+  fprintf(c->logFile, "m->nElems = %d\n", m->nElems);
 
   // Dump permutation arrays
-  printf("oldToNewPerm: ");
+  fprintf(c->logFile, "oldToNewPerm: ");
   for (int i = 0; i < m->nr; ++i) {
-    printf("%d, ", m->oldToNewPerm[i]);
+    fprintf(c->logFile, "%d, ", m->oldToNewPerm[i]);
   }
-  printf("\n");
-  printf("newToOldPerm: ");
+  fprintf(c->logFile, "\n");
+  fprintf(c->logFile, "newToOldPerm: ");
   for (int i = 0; i < m->nr; ++i) {
-    printf("%d, ", m->newToOldPerm[i]);
+    fprintf(c->logFile, "%d, ", m->newToOldPerm[i]);
   }
-  printf("\n");
+  fprintf(c->logFile, "\n");
 
   // Dump chunk data
-  printf("chunkLens: ");
+  fprintf(c->logFile, "chunkLens: ");
   for (int i = 0; i < m->nChunks; ++i) {
-    printf("%d, ", m->chunkLens[i]);
+    fprintf(c->logFile, "%d, ", m->chunkLens[i]);
   }
-  printf("\n");
-  printf("chunkPtr: ");
+  fprintf(c->logFile, "\n");
+  fprintf(c->logFile, "chunkPtr: ");
   for (int i = 0; i < m->nChunks + 1; ++i) {
-    printf("%d, ", m->chunkPtr[i]);
+    fprintf(c->logFile, "%d, ", m->chunkPtr[i]);
   }
-  printf("\n");
+  fprintf(c->logFile, "\n");
 
   // Dump matrix data
-  printf("colInd: ");
+  fprintf(c->logFile, "colInd: ");
   for (int i = 0; i < m->nElems; ++i) {
-    printf("%d, ", m->colInd[i]);
+    fprintf(c->logFile, "%d, ", m->colInd[i]);
   }
-  printf("\n");
-  printf("val: ");
+  fprintf(c->logFile, "\n");
+  fprintf(c->logFile, "val: ");
   for (int i = 0; i < m->nElems; ++i) {
-    printf("%f, ", m->val[i]);
+    fprintf(c->logFile, "%f, ", m->val[i]);
   }
-  printf("\n");
+  fprintf(c->logFile, "\n");
 #endif /* ifdef SCS */
 }
 

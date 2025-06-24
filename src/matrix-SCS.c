@@ -39,8 +39,8 @@ void convertMatrix(Matrix* m, GMatrix* im)
   m->nnz      = im->nnz;
   m->nChunks  = (m->nr + m->C - 1) / m->C;
   m->nrPadded = m->nChunks * m->C;
-  m->C        = (CG_UINT)1;
-  m->sigma    = (CG_UINT)1;
+  // m->C        = (CG_UINT)1;
+  // m->sigma    = (CG_UINT)1;
 
   // (Temporary array) Assign an index to each row to use for row sorting
   SellCSigmaPair* elemsPerRow = (SellCSigmaPair*)allocate(ARRAY_ALIGNMENT,
