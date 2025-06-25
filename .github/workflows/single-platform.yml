@@ -7,7 +7,7 @@ on:
     branches: [ "main", "dane_dev" ]
 
 jobs:
-  build:
+  testMPI:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -63,51 +63,6 @@ jobs:
 
         make
 
-    - name: Upload Executables
-      uses: actions/upload-artifact@v4
-      with:
-        name: sparseBench-SCS-${{ matrix.compiler }}
-        path: |
-          ./sparseBench-SCS-${{ matrix.compiler }}
-
-  runTests:
-    runs-on: ubuntu-latest
-    needs: build
-    strategy:
-      matrix:
-        compiler: [GCC, ICC, CLANG]
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Download Executables
-      uses: actions/download-artifact@v4
-      with:
-        name: sparseBench-SCS-${{ matrix.compiler }}
-        path: ./executables
-
-    - name: Set up Spack
-      uses: spack/setup-spack@v2
-      with:
-        ref: develop
-        buildcache: true
-        color: true
-        path: spack
-
-    - name: Load Compiler and MPI
-      run: |
-        . ./spack/share/spack/setup-env.sh
-
-        if [[ "${{ matrix.compiler }}" == "GCC" ]]; then
-          eval "$(spack load --sh openmpi)"
-        elif [[ "${{ matrix.compiler }}" == "ICC" ]]; then
-          eval "$(spack load --sh intel-oneapi-compilers)"
-          eval "$(spack load --sh intel-oneapi-mpi)"
-        elif [[ "${{ matrix.compiler }}" == "CLANG" ]]; then
-          eval "$(spack load --sh llvm)"
-          eval "$(spack load --sh openmpi)"
-        fi
-
     - name: Make Tests
       run: |
         cd tests
@@ -116,3 +71,57 @@ jobs:
     - name: Run Tests
       run: |
         ./runTests
+
+  #   - name: Upload Executables
+  #     uses: actions/upload-artifact@v4
+  #     with:
+  #       name: sparseBench-SCS-${{ matrix.compiler }}
+  #       path: |
+  #         ./sparseBench-SCS-${{ matrix.compiler }}
+
+  # runTests:
+  #   runs-on: ubuntu-latest
+  #   needs: build
+  #   strategy:
+  #     matrix:
+  #       compiler: [GCC, ICC, CLANG]
+
+  #   steps:
+  #   - uses: actions/checkout@v4
+
+  #   - name: Download Executables
+  #     uses: actions/download-artifact@v4
+  #     with:
+  #       name: sparseBench-SCS-${{ matrix.compiler }}
+  #       path: ./executables
+
+  #   - name: Set up Spack
+  #     uses: spack/setup-spack@v2
+  #     with:
+  #       ref: develop
+  #       buildcache: true
+  #       color: true
+  #       path: spack
+
+  #   - name: Load Compiler and MPI
+  #     run: |
+  #       . ./spack/share/spack/setup-env.sh
+
+  #       if [[ "${{ matrix.compiler }}" == "GCC" ]]; then
+  #         eval "$(spack load --sh openmpi)"
+  #       elif [[ "${{ matrix.compiler }}" == "ICC" ]]; then
+  #         eval "$(spack load --sh intel-oneapi-compilers)"
+  #         eval "$(spack load --sh intel-oneapi-mpi)"
+  #       elif [[ "${{ matrix.compiler }}" == "CLANG" ]]; then
+  #         eval "$(spack load --sh llvm)"
+  #         eval "$(spack load --sh openmpi)"
+  #       fi
+
+    # - name: Make Tests
+    #   run: |
+    #     cd tests
+    #     make
+
+    # - name: Run Tests
+    #   run: |
+    #     ./runTests
