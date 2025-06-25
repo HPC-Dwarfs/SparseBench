@@ -33,7 +33,7 @@ endif
 
 .PHONY: all clean
 
-all: clean $(TARGET)
+all: $(TARGET)
 
 clean:
 	rm -f $(TARGET) $(OBJECTS) runTests.o

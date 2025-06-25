@@ -79,46 +79,23 @@ jobs:
           echo ">>> Building and testing with $FMT matrix format."
 
           sed -E -i \
-            -e 's/^(ENABLE_MPI[[:space:]]*\?=).*/\1true/' \
-            -e 's/^(ENABLE_OPENMP[[:space:]]*\?=).*/\1false/' \
-            -e "s/^(MTX_FMT[[:space:]]*\?=).*/\1$FMT/" \
-            -e "s/^(TOOLCHAIN[[:space:]]*\?=).*/\1${{ matrix.compiler }}/" \
-            config.mk
+          -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
+          -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
+          -e "s/^(MTX_FMT[[:space:]]*\?=[[:space:]]*).*/\1${FMT}/" \
+          -e "s/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1${TOOLCHAIN}/" \
+          config.mk
 
-          make -j                # Build sparseBench
-          cd tests
-          make -j                # Build tests
-          mpirun -n 1 ./runTests # Run (single rank) tests
+          # Build (MPI-only) sparseBench
+          make
+
+          # Build tests
+          cd tests && make clean && make
+
+          # Run (single rank) tests
+          mpirun -n 1 ./runTests
           cd ..
         }
 
-        # Run both test formats
+        # Run tests with both formats
         run_tests CRS
         run_tests SCS
-
-        # # Set build configuration flags to CRS in config.mk
-        # sed -E -i \
-        #   -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
-        #   -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
-        #   -e 's/^(MTX_FMT[[:space:]]*\?=[[:space:]]*).*/\1CRS/' \
-        #   -e "s/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1${TOOLCHAIN}/" \
-        #   config.mk
-
-        # make                    # Build the main project
-        # cd tests                # Move into the tests directory
-        # make                    # Build test suite
-        # mpirun -n 1 ./runTests  # Run the (single rank) tests
-
-        # cd ../
-        # # Set build configuration flags to SCS in config.mk
-        # sed -E -i \
-        #   -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
-        #   -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
-        #   -e 's/^(MTX_FMT[[:space:]]*\?=[[:space:]]*).*/\1SCS/' \
-        #   -e "s/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1${TOOLCHAIN}/" \
-        #   config.mk
-
-        # make                    # Build the main project
-        # cd tests                # Move into the tests directory
-        # make                    # Build test suite
-        # mpirun -n 1 ./runTests  # Run the (single rank) tests
