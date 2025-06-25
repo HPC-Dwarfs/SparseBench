@@ -16,7 +16,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Spack
+    - name: Set-up Spack
       uses: spack/setup-spack@v2
       with:
         ref: develop
@@ -24,7 +24,7 @@ jobs:
         color: true
         path: spack
 
-    - name: Install Compiler and MPI
+    - name: Install Compilers and MPI Wrappers
       run: |
         . ./spack/share/spack/setup-env.sh
 
@@ -38,7 +38,7 @@ jobs:
           spack install -j 4 openmpi
         fi
 
-    - name: Configure and Make
+    - name: Configure and Make SparseBench
       run: |
         . ./spack/share/spack/setup-env.sh
         
@@ -63,14 +63,27 @@ jobs:
 
         make
 
-    - name: Make Tests
+    - name: Make and Run Tests
       run: |
+        . ./spack/share/spack/setup-env.sh
+        
+        if [[ "${{ matrix.compiler }}" == "GCC" ]]; then
+          eval "$(spack load --sh openmpi)"
+        elif [[ "${{ matrix.compiler }}" == "ICC" ]]; then
+          eval "$(spack load --sh intel-oneapi-compilers)"
+          eval "$(spack load --sh intel-oneapi-mpi)"
+        elif [[ "${{ matrix.compiler }}" == "CLANG" ]]; then
+          eval "$(spack load --sh llvm)"
+          eval "$(spack load --sh openmpi)"
+        fi
+
         cd tests
         make
-
-    - name: Run Tests
-      run: |
         ./runTests
+
+    # - name: Run Tests
+    #   run: |
+    #     ./runTests
 
   #   - name: Upload Executables
   #     uses: actions/upload-artifact@v4
