@@ -1,50 +1,41 @@
 // DL 2025.06.25
-// Unit test: Performs SpMV (sparse matrix-vector multiplication) in SCS format
+// Unit test: Converts a Matrix Market (MM) matrix to internal CRS format
 //            and compares against expected output from disk.
 // Assumes a single MPI rank (no parallel communication).
 
-#include "../../src/allocate.h"
 #include "../../src/comm.h"
-#include "../../src/debugger.h"
 #include "../../src/matrix.h"
-#include "../../src/solver.h"
 #include "../common.h"
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _OPENMP
-#include "../../src/affinity.h"
-#include <omp.h>
-#endif
-
 /**
- * Runs SpMV tests for all `.mtx` files in `dataDir/testMatrices/`.
+ * Runs conversion tests for all `.mtx` files in `dataDir/testMatrices/`.
  *
  * For each matrix:
- *  1. Loads the file as a Matrix Market input
- *  2. Builds internal format with given C/sigma
- *  3. Computes y = A * x with x = 1
- *  4. Dumps the result to a file
- *  5. Compares against expected result (if present)
+ *  1. Builds full path to the file
+ *  2. Loads MM matrix and converts it to GMatrix, and then CRS
+ *  3. Dumps the converted result to a file
+ *  4. Compares the dump against expected result (if present)
  *
  * Returns 0 on success, 1 if any test fails.
  */
-
-int test_spmvSCS(void* args, const char* dataDir)
+int test_convertCRS(void* args, const char* dataDir)
 {
   // Compose path to directory containing test matrices
   char matricesPath[STR_LEN];
   snprintf(matricesPath, STR_LEN, "%s%s", dataDir, "testMatrices/");
 
-  // Open the matrix directory for reading
+  // Open the directory and check for errors
   DIR* dir = opendir(matricesPath);
   if (dir == NULL) {
     perror("Error opening directory");
     return 1;
   }
 
+  // Read the directory entries
   struct dirent* entry;
 
   // Iterate through files in the directory
@@ -59,18 +50,13 @@ int test_spmvSCS(void* args, const char* dataDir)
       MMMatrix M;
       Args* arguments = (Args*)args;
 
-      // Extract C and sigma values from filename, using helper macro
-      char C_str[STR_LEN];
-      char sigma_str[STR_LEN];
-      sprintf(C_str, "%d", arguments->C);
-      sprintf(sigma_str, "%d", arguments->sigma);
-      FORMAT_AND_STRIP_VECTOR_FILE(entry);
+      STRIP_MATRIX_FILE(entry) // Removes .mtx from file name
 
       // Path to expected output (".in" file) for this matrix
       char pathToExpectedData[STR_LEN];
       snprintf(pathToExpectedData,
           STR_LEN,
-          "data/expected/%s_spmv_x_1.in",
+          "data/expected/%s_CRS.in",
           entry->d_name);
 
       // Only test if expected file exists
@@ -80,27 +66,25 @@ int test_spmvSCS(void* args, const char* dataDir)
         char pathToReportedData[STR_LEN];
         snprintf(pathToReportedData,
             STR_LEN,
-            "data/reported/%s_C_%s_sigma_%s_spmv_x_1.out",
-            entry->d_name,
-            C_str,
-            sigma_str);
+            "data/reported/%s_CRS.out",
+            entry->d_name);
 
         // Open output file for writing results
         FILE* reportedData = fopen(pathToReportedData, "w");
         if (reportedData == NULL) {
           perror("fopen failed for reportedData");
-          exit(EXIT_FAILURE);
+          exit(EXIT_FAILURE); // Crash fast on I/O error
         }
 
-        // Read matrix from Matrix Market file
+        // Load matrix from Matrix Market file
         MMMatrixRead(&M, matrixPath);
 
-        // Declare matrix and communication structs
+        // Declare graph and algebraic matrices
         GMatrix m;
         Matrix A;
         Comm c;
 
-        // Set single-rank defaults
+        // Set single-rank defaults (no parallel distribution)
         M.startRow = 0;
         M.stopRow  = M.nr;
         M.totalNr  = M.nr;
@@ -111,28 +95,12 @@ int test_spmvSCS(void* args, const char* dataDir)
 
         // Convert to internal formats
         matrixConvertfromMM(&M, &m); // MM → GMatrix
-        A.C     = arguments->C;
-        A.sigma = arguments->sigma;
-        convertMatrix(&A, &m); // GMatrix → Matrix
-
-        CG_FLOAT* x = (CG_FLOAT*)allocate(ARRAY_ALIGNMENT,
-            A.nrPadded * sizeof(CG_FLOAT));
-        CG_FLOAT* y = (CG_FLOAT*)allocate(ARRAY_ALIGNMENT,
-            A.nrPadded * sizeof(CG_FLOAT));
-
-        for (int i = 0; i < A.nrPadded; ++i) {
-          x[i] = (CG_FLOAT)1.0;
-          y[i] = (CG_FLOAT)0.0;
-        }
-
-        spMVM(&A, x, y);
-        // Output formatted result
-        commVectorDump(&c, y, A.nr, pathToReportedData);
+        convertMatrix(&A, &m);       // GMatrix → Matrix
+        commMatrixDump(&c, &A);      // Output formatted result
         fclose(reportedData);
 
         // Diff against expected file — if mismatch, fail the test
-        // Need to offset the reported data by 1 line
-        if (diff_files(pathToExpectedData, pathToReportedData, 1)) {
+        if (diff_files(pathToExpectedData, pathToReportedData, 0)) {
           closedir(dir);
           return 1;
         }
@@ -140,7 +108,7 @@ int test_spmvSCS(void* args, const char* dataDir)
     }
   }
 
-  // Cleanup and exit
+  // Clean up and return success
   closedir(dir);
   return 0;
 }

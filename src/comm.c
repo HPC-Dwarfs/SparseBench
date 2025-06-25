@@ -714,6 +714,7 @@ void commPrintConfig(
 #endif
 }
 
+// TODO: Unify matrix dumping
 void commMatrixDump(Comm* c, Matrix* m)
 {
   int rank = c->rank;
@@ -726,30 +727,28 @@ void commMatrixDump(Comm* c, Matrix* m)
   CG_FLOAT* val   = m->val;
 
   if (commIsMaster(c)) {
-    printf("Matrix: %d total non zeroes, total number of rows %d\n",
+    fprintf(c->logFile,
+        "Matrix: %d total non zeroes, total number of rows %d\n",
         m->totalNnz,
         m->totalNr);
   }
 
   for (int i = 0; i < size; i++) {
     if (i == rank) {
-      printf("Rank %d: number of rows %d\n", rank, numRows);
+      fprintf(c->logFile, "Rank %d: number of rows %d\n", rank, numRows);
 
       for (int rowID = 0; rowID < numRows; rowID++) {
-        printf("Row [%d]: ", rowID);
+        fprintf(c->logFile, "Row [%d]: ", rowID);
 
         for (int rowEntry = rowPtr[rowID]; rowEntry < rowPtr[rowID + 1];
             rowEntry++) {
-          printf("[%d]:%.2f ", colInd[rowEntry], val[rowEntry]);
+          fprintf(c->logFile, "[%d]:%.2f ", colInd[rowEntry], val[rowEntry]);
         }
 
-        printf("\n");
+        fprintf(c->logFile, "\n");
       }
-      fflush(stdout);
+      fflush(c->logFile);
     }
-#ifdef _MPI
-    MPI_Barrier(MPI_COMM_WORLD);
-#endif
   }
 #endif /* ifdef CRS */
 #ifdef SCS
@@ -802,6 +801,9 @@ void commMatrixDump(Comm* c, Matrix* m)
   }
   fprintf(c->logFile, "\n");
 #endif /* ifdef SCS */
+#ifdef _MPI
+  MPI_Barrier(MPI_COMM_WORLD);
+#endif
 }
 
 void commVectorDump(Comm* c, CG_FLOAT* v, CG_UINT size, char* name)

@@ -4,10 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SET_ARGS(i, C_val, sigma_val)                                          \
+#define SET_SCS_ARGS(i, C_val, sigma_val)                                      \
   {                                                                            \
-    args[i]->C     = (C_val);                                                  \
-    args[i]->sigma = (sigma_val);                                              \
+    args[i].C     = (C_val);                                                   \
+    args[i].sigma = (sigma_val);                                               \
   }
 
 typedef int (*TestFunc)(void* config, const char* dataDir);
@@ -36,11 +36,9 @@ typedef struct {
   }
 #endif
 
-#ifndef FORMAT_AND_STRIP_MATRIX_FILE
-#define FORMAT_AND_STRIP_MATRIX_FILE(A, entry, C_str, sigma_str, arguments)    \
+#ifndef STRIP_MATRIX_FILE
+#define STRIP_MATRIX_FILE(entry)                                               \
   {                                                                            \
-    sprintf((C_str), "%d", arguments->C);                                      \
-    sprintf((sigma_str), "%d", arguments->sigma);                              \
     char* dot = strrchr((entry)->d_name, '.');                                 \
     if (dot != NULL) {                                                         \
       *dot = '\0';                                                             \
@@ -77,7 +75,8 @@ typedef struct {
 #define ARRAY_ALIGNMENT 64
 #endif
 
-static int diff_files(const char* expectedData, const char* reportedData)
+static int diff_files(
+    const char* expectedData, const char* reportedData, int offset)
 {
   FILE* f1 = fopen(expectedData, "r");
   FILE* f2 = fopen(reportedData, "r");
@@ -89,6 +88,19 @@ static int diff_files(const char* expectedData, const char* reportedData)
 
   char line1[2048], line2[2048];
   int line_number = 1; // Line number counter
+
+  // Skip offset lines in reported file (f2)
+  for (int i = 0; i < offset; i++) {
+    if (fgets(line1, sizeof(line1), f2) == NULL) {
+      printf("Reported file %s has fewer than %d lines to skip.\n",
+          reportedData,
+          offset);
+      fclose(f1);
+      fclose(f2);
+      return 1;
+    }
+    line_number++;
+  }
 
   // Compare lines until one of the files ends
   while (fgets(line1, sizeof(line1), f1) != NULL &&
