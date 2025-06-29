@@ -1,5 +1,5 @@
 // DL 2025.06.25
-// Unit test: Performs SpMV (sparse matrix-vector multiplication) in SCS format
+// Unit test: Performs SpMV (sparse matrix-vector multiplication) in CRS format
 //            and compares against expected output from disk.
 // Assumes a single MPI rank (no parallel communication).
 
@@ -24,15 +24,14 @@
  *
  * For each matrix:
  *  1. Loads the file as a Matrix Market input
- *  2. Builds internal format with given C/sigma
- *  3. Computes y = A * x with x = 1
- *  4. Dumps the result to a file
- *  5. Compares against expected result (if present)
+ *  2. Computes y = A * x with x = 1
+ *  3. Dumps the result to a file
+ *  4. Compares against expected result (if present)
  *
  * Returns 0 on success, 1 if any test fails.
  */
 
-int test_spmvSCS(void* args, const char* dataDir)
+int test_spmvCRS(void* args, const char* dataDir)
 {
   // Compose path to directory containing test matrices
   char matricesPath[STR_LEN];
@@ -59,11 +58,6 @@ int test_spmvSCS(void* args, const char* dataDir)
       MMMatrix M;
       Args* arguments = (Args*)args;
 
-      // Extract C and sigma values from filename, using helper macro
-      char C_str[STR_LEN];
-      char sigma_str[STR_LEN];
-      sprintf(C_str, "%d", arguments->C);
-      sprintf(sigma_str, "%d", arguments->sigma);
       FORMAT_AND_STRIP_VECTOR_FILE(entry);
 
       // Path to expected output (".in" file) for this matrix
@@ -80,10 +74,8 @@ int test_spmvSCS(void* args, const char* dataDir)
         char pathToReportedData[STR_LEN];
         snprintf(pathToReportedData,
             STR_LEN,
-            "data/reported/%s_C_%s_sigma_%s_spmv_x_1.out",
-            entry->d_name,
-            C_str,
-            sigma_str);
+            "data/reported/%s_CRS_spmv_x_1.out",
+            entry->d_name);
 
         // Open output file for writing results
         FILE* reportedData = fopen(pathToReportedData, "w");
@@ -111,16 +103,14 @@ int test_spmvSCS(void* args, const char* dataDir)
 
         // Convert to internal formats
         matrixConvertfromMM(&M, &m); // MM → GMatrix
-        A.C     = arguments->C;
-        A.sigma = arguments->sigma;
-        convertMatrix(&A, &m); // GMatrix → Matrix
+        convertMatrix(&A, &m);       // GMatrix → Matrix
 
         CG_FLOAT* x = (CG_FLOAT*)allocate(ARRAY_ALIGNMENT,
-            A.nrPadded * sizeof(CG_FLOAT));
+            A.nr * sizeof(CG_FLOAT));
         CG_FLOAT* y = (CG_FLOAT*)allocate(ARRAY_ALIGNMENT,
-            A.nrPadded * sizeof(CG_FLOAT));
+            A.nr * sizeof(CG_FLOAT));
 
-        for (int i = 0; i < A.nrPadded; ++i) {
+        for (int i = 0; i < A.nr; ++i) {
           x[i] = (CG_FLOAT)1.0;
           y[i] = (CG_FLOAT)0.0;
         }

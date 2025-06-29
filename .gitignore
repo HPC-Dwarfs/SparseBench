@@ -60,3 +60,4 @@ tests/runTests
 tests/*.o
 tests/matrix/*.o
 tests/data/reported/*
+!tests/data/reported/.gitignore

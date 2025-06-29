@@ -1,0 +1,101 @@
+name: Build and Run Unit Tests
+
+on:
+  push:
+    branches: [ "main", "dane_dev" ]
+  pull_request:
+    branches: [ "main", "dane_dev" ]
+
+jobs:
+  testMPI:
+    runs-on: ubuntu-latest
+    # Define a build matrix over compilers
+    strategy:
+      matrix:
+        compiler: [GCC, ICC, CLANG]
+
+    steps:
+    # 1) Check out the repository code
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # 2) Set up Spack for package management
+    - name: Set-up Spack
+      uses: spack/setup-spack@v2
+      with:
+        ref: develop            # Use the 'develop' branch of the spack/setup-spack action
+        buildcache: true        # Enable Spack binary cache
+        color: true             # Enable colored output
+        path: spack             # Install Spack under ./spack directory
+
+    # 3) Install necessary compiler and MPI packages via Spack
+    - name: Install Compilers and MPI Wrappers
+      run: |
+        # Source Spack environment to get spack commands
+        . ./spack/share/spack/setup-env.sh
+
+        # Based on matrix.compiler, install the right packages
+        case "${{ matrix.compiler }}" in
+          GCC)
+            # Install OpenMPI for GCC
+            spack install -j 4 openmpi;;
+          ICC)
+            # Install Intel compilers and Intel MPI
+            spack install -j 4 intel-oneapi-compilers
+            spack install -j 4 intel-oneapi-mpi;;
+          CLANG)
+            # Install LLVM/Clang and OpenMPI
+            spack install -j 4 llvm
+            spack install -j 4 openmpi;;
+        esac
+
+    # 4) Configure, build, and run tests in one step to preserve environment
+    - name: Configure and Make SparseBench Tests
+      run: |
+        # Re-source Spack so we have spack load available
+        . ./spack/share/spack/setup-env.sh
+        
+        # Based on matrix.compiler, load the correct compiler/MPI into this shell
+        case "${{ matrix.compiler }}" in
+          GCC)
+            # Load OpenMPI for GCC
+            eval "$(spack load --sh openmpi)";;
+          ICC)
+            # Load Intel compilers and Intel MPI
+            eval "$(spack load --sh intel-oneapi-compilers)"
+            eval "$(spack load --sh intel-oneapi-mpi)";;
+          CLANG)
+            # Load LLVM/Clang and OpenMPI
+            eval "$(spack load --sh llvm)"
+            eval "$(spack load --sh openmpi)";;
+        esac
+
+        # Export TOOLCHAIN for the Makefile
+        export TOOLCHAIN="${{ matrix.compiler }}"
+
+        # Define reusable logic
+        run_tests() {
+          local FMT=$1
+          echo ">>> Building and testing with $FMT matrix format."
+
+          sed -E -i \
+          -e 's/^(ENABLE_MPI[[:space:]]*\?=[[:space:]]*).*/\1true/' \
+          -e 's/^(ENABLE_OPENMP[[:space:]]*\?=[[:space:]]*).*/\1false/' \
+          -e "s/^(MTX_FMT[[:space:]]*\?=[[:space:]]*).*/\1${FMT}/" \
+          -e "s/^(TOOLCHAIN[[:space:]]*\?=[[:space:]]*).*/\1${TOOLCHAIN}/" \
+          config.mk
+
+          # Build (MPI-only) sparseBench
+          make
+
+          # Build tests
+          cd tests && make clean && make
+
+          # Run (single rank) tests
+          mpirun -n 1 ./runTests
+          cd ..
+        }
+
+        # Run tests with both formats
+        run_tests CRS
+        run_tests SCS

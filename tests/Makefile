@@ -1,11 +1,11 @@
-# # # DL 2025.04.04
+# # # DL 2025.06.25
 # # # Collection of unit tests
 
 include ../config.mk
 include ../mk/include_$(TOOLCHAIN).mk
 
 BUILD_DIR=../build
-TC_DIR=${BUILD_DIR}/$(TOOLCHAIN)
+TC_DIR=${BUILD_DIR}/$(MTX_FMT)-$(TOOLCHAIN)
 
 # List of test modules
 MOD1=matrix
@@ -18,12 +18,18 @@ LINKS := $(filter-out ${TC_DIR}/main.o, $(wildcard ${TC_DIR}/*.o))
 TARGET=runTests
 
 # Collect objects from all test modules
-MOD1_OBJECTS=${MOD1}/convertSCS.o ${MOD1}/matrixTests.o
-MOD2_OBJECTS=${MOD2}/spmvSCS.o ${MOD2}/solverTests.o
+MOD1_OBJECTS=${MOD1}/convert$(MTX_FMT).o ${MOD1}/matrixTests.o
+MOD2_OBJECTS=${MOD2}/spmv$(MTX_FMT).o ${MOD2}/solverTests.o
 OBJECTS := $(shell echo $(MOD1_OBJECTS) $(MOD2_OBJECTS) | tr ' ' '\n' | sort -u | tr '\n' ' ')
 
 # Always leave debugging flag on
-CFLAGS=-g -qopenmp
+CFLAGS=-g $(DEFINES)
+
+# Only enable OpenMP if it defined in the parent config.mk
+ifeq ($(strip $(ENABLE_OPENMP)),true)
+CFLAGS += $(OPENMP)
+endif
+# If enabled, MPI wrappers are already in CC
 
 .PHONY: all clean
 
@@ -44,12 +50,12 @@ runTests.o: runTests.c
 $(MOD1)/matrixTests.o: $(MOD1)/matrixTests.c 
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(MOD1)/convertSCS.o: $(MOD1)/convertSCS.c
+$(MOD1)/convert$(MTX_FMT).o: $(MOD1)/convert$(MTX_FMT).c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Module 2 tests: solver
 $(MOD2)/solverTests.o: $(MOD2)/solverTests.c 
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(MOD2)/spmvSCS.o: $(MOD2)/spmvSCS.c
+$(MOD2)/spmv$(MTX_FMT).o: $(MOD2)/spmv$(MTX_FMT).c
 	$(CC) $(CFLAGS) -c -o $@ $<

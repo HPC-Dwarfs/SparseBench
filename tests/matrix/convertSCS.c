@@ -1,91 +1,127 @@
-// DL 2025.04.04
-// Single rank test to convert MM to SCS format
+// DL 2025.06.25
+// Unit test: Converts a Matrix Market (MM) matrix to internal SCS format
+//            and compares against expected output from disk.
+// Assumes a single MPI rank (no parallel communication).
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <dirent.h>
-#include <string.h>
+#include "../../src/comm.h"
 #include "../../src/matrix.h"
 #include "../common.h"
+#include <dirent.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-int test_convertSCS(void* args, const char* dataDir){
+/**
+ * Runs conversion tests for all `.mtx` files in `dataDir/testMatrices/`.
+ *
+ * For each matrix:
+ *  1. Builds full path to the file
+ *  2. Parses metadata for C and sigma
+ *  3. Loads MM matrix and converts it to GMatrix, and then SCS
+ *  4. Dumps the converted result to a file
+ *  5. Compares the dump against expected result (if present)
+ *
+ * Returns 0 on success, 1 if any test fails.
+ */
+int test_convertSCS(void* args, const char* dataDir)
+{
+  // Compose path to directory containing test matrices
+  char matricesPath[STR_LEN];
+  snprintf(matricesPath, STR_LEN, "%s%s", dataDir, "testMatrices/");
 
-	int rank = 0;
-	int size = 1;
+  // Open the directory and check for errors
+  DIR* dir = opendir(matricesPath);
+  if (dir == NULL) {
+    perror("Error opening directory");
+    return 1;
+  }
 
-	// Open the directory
-	char *pathToMatrices = malloc(strlen(dataDir) + strlen("testMatrices/") + 1);
-	strcpy(pathToMatrices, dataDir);	
-	strcat(pathToMatrices, "testMatrices/");
+  // Read the directory entries
+  struct dirent* entry;
 
-	DIR *dir = opendir( pathToMatrices );
-	if (dir == NULL) {
-			perror("Error opening directory");
-			return 1;
-	}
+  // Iterate through files in the directory
+  while ((entry = readdir(dir)) != NULL) {
+    // Only process files with ".mtx" extension
+    if (strstr(entry->d_name, ".mtx") != NULL) {
 
-	// Read the directory entries
-	struct dirent *entry;
-	while ((entry = readdir(dir)) != NULL) {
-		if (strstr(entry->d_name, ".mtx") != NULL){
-			char *pathToMatrix = malloc(strlen(pathToMatrices) + strlen(entry->d_name) + 1);
-			strcpy(pathToMatrix, pathToMatrices);	
-			strcat(pathToMatrix, entry->d_name);
+      // Build full path to matrix file
+      char matrixPath[STR_LEN];
+      snprintf(matrixPath, STR_LEN, "%s%s", matricesPath, entry->d_name);
 
-			Matrix A;
-			Args* arguments = (Args*)args;
-			A.C = arguments->C;
-			A.sigma = arguments->sigma;
+      MMMatrix M;
+      Args* arguments = (Args*)args;
 
-			// String preprocessing
-			char C_str[STR_LEN];                           
-			char sigma_str[STR_LEN];
-			FORMAT_AND_STRIP_MATRIX_FILE(A, entry, C_str, sigma_str)
+      // Extract C and sigma values from filename, using helper macro
+      char C_str[STR_LEN];
+      char sigma_str[STR_LEN];
+      sprintf(C_str, "%d", arguments->C);
+      sprintf(sigma_str, "%d", arguments->sigma);
 
-			// This is the external file to check against
-			char *pathToExpectedData = malloc(STR_LEN);
-			BUILD_MATRIX_FILE_PATH(entry, "expected/", ".in", C_str, sigma_str, pathToExpectedData);
+      STRIP_MATRIX_FILE(entry) // Removes .mtx from file name
 
-			// Validate against expected data, if it exists
-			if(fopen(pathToExpectedData, "r")){
+      // Path to expected output (".in" file) for this matrix
+      char pathToExpectedData[STR_LEN];
+      snprintf(pathToExpectedData,
+          STR_LEN,
+          "data/expected/%s_C_%s_sigma_%s.in",
+          entry->d_name,
+          C_str,
+          sigma_str);
 
-				MmMatrix m;
-				matrixRead( &m, pathToMatrix );
+      // Only test if expected file exists
+      if (fopen(pathToExpectedData, "r")) {
 
-				// Set single rank defaults for MmMatrix
-				m.startRow = 0;
-				m.stopRow = m.nr;
-				m.totalNr = m.nr;
-				m.totalNnz = m.nnz;
-			
-				matrixConvertMMtoSCS(&m, &A, rank, size);
+        // Path to write reported output (".out" file)
+        char pathToReportedData[STR_LEN];
+        snprintf(pathToReportedData,
+            STR_LEN,
+            "data/reported/%s_C_%s_sigma_%s.out",
+            entry->d_name,
+            C_str,
+            sigma_str);
 
-				// Dump to this external file
-				char *pathToReportedData = malloc(STR_LEN);
-				BUILD_MATRIX_FILE_PATH(entry, "reported/", ".out", C_str, sigma_str, pathToReportedData);
-				FILE *reportedData = fopen(pathToReportedData, "w");
+        // Open output file for writing results
+        FILE* reportedData = fopen(pathToReportedData, "w");
+        if (reportedData == NULL) {
+          perror("fopen failed for reportedData");
+          exit(EXIT_FAILURE); // Crash fast on I/O error
+        }
 
-				dumpSCSMatrixToFile(&A, reportedData);
-				fclose(reportedData);
-			
-				// If the expect and reported data differ in some way
-				if(diff_files(pathToExpectedData, pathToReportedData)){
-					free(pathToReportedData);
-					free(pathToExpectedData);
-					free(pathToMatrix);
+        // Read matrix from Matrix Market file
+        MMMatrixRead(&M, matrixPath);
 
-					closedir(dir);
-					return 1;
-				} 
-			}
+        // Declare matrix and communication structs
+        GMatrix m;
+        Matrix A;
+        Comm c;
 
-			free(pathToExpectedData);
-			free(pathToMatrix);
-		}
-	}
+        // Set single-rank defaults
+        M.startRow = 0;
+        M.stopRow  = M.nr;
+        M.totalNr  = M.nr;
+        M.totalNnz = M.nnz;
+        c.rank     = 0;
+        c.size     = 1;
+        c.logFile  = reportedData;
 
-	free(pathToMatrices);
-	closedir(dir);
+        // Convert to internal formats
+        matrixConvertfromMM(&M, &m); // MM → GMatrix
+        A.C     = arguments->C;
+        A.sigma = arguments->sigma;
+        convertMatrix(&A, &m);  // GMatrix → Matrix
+        commMatrixDump(&c, &A); // Output formatted result
+        fclose(reportedData);
 
-	return 0;
+        // Diff against expected file — if mismatch, fail the test
+        if (diff_files(pathToExpectedData, pathToReportedData, 0)) {
+          closedir(dir);
+          return 1;
+        }
+      }
+    }
+  }
+
+  // Clean up and return success
+  closedir(dir);
+  return 0;
 }
