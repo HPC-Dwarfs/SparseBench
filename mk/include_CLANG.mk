@@ -14,9 +14,6 @@ endif
 
 # Set default 
 C_VERSION = c17
-ifeq ($(strip $(HAVE_C23)),true)
-C_VERSION = c23
-endif
 
 VERSION  = --version
 CFLAGS   = -O3 -ffast-math -std=$(C_VERSION) $(OPENMP)
