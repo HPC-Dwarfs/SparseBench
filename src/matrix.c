@@ -48,7 +48,7 @@ void matrixGenerate(
     }
     printf("%.2e total rows and %.2e nonzeros\n",
         (double)total_nrow,
-        (double)local_nnz);
+        (double)total_nnz);
   }
 
   m->entries = (Entry*)allocate(ARRAY_ALIGNMENT, local_nnz * sizeof(Entry));

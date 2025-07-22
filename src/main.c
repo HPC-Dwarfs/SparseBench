@@ -181,9 +181,9 @@ int main(int argc, char** argv)
   size_t factorFlops[NUMREGIONS];
   size_t factorWords[NUMREGIONS];
   factorFlops[DDOT]   = m.totalNr;
-  factorWords[DDOT]   = sizeof(CG_FLOAT) * m.totalNr;
+  factorWords[DDOT]   = 3 * sizeof(CG_FLOAT) * m.totalNr / 2;
   factorFlops[WAXPBY] = m.totalNr;
-  factorWords[WAXPBY] = sizeof(CG_FLOAT) * m.totalNr;
+  factorWords[WAXPBY] = 3 * sizeof(CG_FLOAT) * m.totalNr;
   factorFlops[SPMVM]  = m.totalNnz;
   factorWords[SPMVM]  = sizeof(CG_FLOAT) * m.totalNnz +
                        sizeof(CG_UINT) * m.totalNnz;
