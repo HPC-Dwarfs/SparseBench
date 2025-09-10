@@ -1,11 +1,15 @@
 # Supported: GCC, CLANG, ICC
-TOOLCHAIN ?= ICC
+TOOLCHAIN ?= GCC
 # Supported CRS, SCS, CCRS
 MTX_FMT ?= CRS
-ENABLE_MPI ?= true
-ENABLE_OPENMP ?= false
+ENABLE_MPI ?= false
+ENABLE_OPENMP ?= true
 FLOAT_TYPE ?= DP # SP for float, DP for double
 UINT_TYPE ?= U # U for unsigned int, ULL for unsigned long long int
+
+ENABLE_CCINST ?= true
+CCINST_INCDIR := /home/unrz139/Work/cc-instrumentation/include
+CCINST_LIBDIR := /home/unrz139/Work/cc-instrumentation
 
 #Feature options
 OPTIONS +=  -DARRAY_ALIGNMENT=64

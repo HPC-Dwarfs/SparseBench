@@ -19,6 +19,10 @@
 #include "timing.h"
 #include "util.h"
 
+#ifdef WITH_CCINST
+#include <ccinst.h>
+#endif
+
 typedef enum { CG = 0, SPMV, GMRES, CHEBFD, NUMTYPES } types;
 
 #define HELPTEXT                                                               \
@@ -170,18 +174,31 @@ int main(int argc, char **argv) {
   if (stop) {
     commAbort(&comm, "Wrong command line arguments");
   }
+#ifdef WITH_CCINST
+  ccinst_init_file("sparseBench.log");
+#endif
 
   commPrintBanner(&comm);
 
   double timeStart, timeStop, ts;
   GMatrix m;
+#ifdef WITH_CCINST
+  ccinst_start("initMatrix");
+#endif
   timeStart = getTimeStamp();
   initMatrix(&comm, &param, &m);
   commBarrier();
   timeStop = getTimeStamp();
+#ifdef WITH_CCINST
+  ccinst_stop("initMatrix");
+  ccinst_set_region_value_double("initMatrix", "runtime", timeStop - timeStart);
+#endif
   if (commIsMaster(&comm)) {
     printf("Init matrix took %.2fs\n", timeStop - timeStart);
   }
+#ifdef WITH_CCINST
+  ccinst_start("convertMatrix");
+#endif
   timeStart = getTimeStamp();
   commPartition(&comm, &m);
   // commPrintConfig(&comm, m.nr, m.nnz, m.startRow, m.stopRow);
@@ -193,7 +210,13 @@ int main(int argc, char **argv) {
   if (commIsMaster(&comm)) {
     printf("Parallel localization and matrix conversion took %.2fs\n",
            timeStop - timeStart);
+#ifdef WITH_CCINST
+    ccinst_set_region_value_double("convertMatrix", "runtime", timeStop - timeStart);
+#endif
   }
+#ifdef WITH_CCINST
+  ccinst_stop("convertMatrix");
+#endif
 
   size_t factorFlops[NUMREGIONS];
   size_t factorWords[NUMREGIONS];
@@ -214,12 +237,21 @@ int main(int argc, char **argv) {
     if (commIsMaster(&comm)) {
       printf("Test type: CG\n");
     }
+#ifdef WITH_CCINST
+    ccinst_start("solveCG");
+#endif
     k = solveCG(&comm, &param, &sm);
+#ifdef WITH_CCINST
+    ccinst_stop("solveCG");
+#endif
     break;
   case SPMV:
     if (commIsMaster(&comm)) {
       printf("Test type: SPMVM\n");
     }
+#ifdef WITH_CCINST
+    ccinst_start("spMVM");
+#endif
     int itermax = param.itermax;
     CG_FLOAT *x =
         (CG_FLOAT *)allocate(ARRAY_ALIGNMENT, m.nc * sizeof(CG_FLOAT));
@@ -234,6 +266,9 @@ int main(int argc, char **argv) {
     for (k = 1; k < itermax; k++) {
       PROFILE(SPMVM, spMVM(&sm, x, y));
     }
+#ifdef WITH_CCINST
+    ccinst_stop("spMVM");
+#endif
     break;
   case GMRES:
     if (commIsMaster(&comm)) {
@@ -246,6 +281,9 @@ int main(int argc, char **argv) {
   profilerPrint(&comm, k);
   profilerFinalize();
   commFinalize(&comm);
+#ifdef WITH_CCINST
+  ccinst_close();
+#endif
 
   return EXIT_SUCCESS;
 }

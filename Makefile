@@ -19,6 +19,14 @@ VPATH     = $(SRC_DIR)
 ASM       = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.s,$(wildcard $(SRC_DIR)/*.c))
 OBJ       = $(filter-out $(BUILD_DIR)/matrix-%, $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o,$(wildcard $(SRC_DIR)/*.c)))
 SRC       = $(wildcard $(SRC_DIR)/*.h $(SRC_DIR)/*.c)
+
+ifeq ($(strip $(ENABLE_CCINST)),true)
+INCLUDES += -I$(CCINST_INCDIR)
+LFLAGS += -L$(CCINST_LIBDIR)
+LIBS += -lccinst
+DEFINES += -DWITH_CCINST
+endif
+
 CPPFLAGS := $(CPPFLAGS) $(DEFINES) $(OPTIONS) $(INCLUDES)
 c := ,
 clist = $(subst $(eval) ,$c,$(strip $1))
