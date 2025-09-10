@@ -39,6 +39,7 @@ typedef enum { CG = 0, SPMV, GMRES, CHEBFD, NUMTYPES } types;
   "  -i <int>   Number of solver iterations. Default 150.\n"                   \
   "  -e <float>  Convergence criteria epsilon. Default 0.0.\n"
 
+#ifdef _MPI
 static void writeBinMatrix(Comm *c, char *filename) {
   MMMatrix mm, mmLocal;
   GMatrix m;
@@ -49,6 +50,7 @@ static void writeBinMatrix(Comm *c, char *filename) {
   matrixConvertfromMM(&mmLocal, &m);
   matrixBinWrite(&m, c, changeFileEnding(filename, ".bmx"));
 }
+#endif
 
 static void initMatrix(Comm *c, Parameter *p, GMatrix *m) {
   if (strcmp(p->filename, "generate") == 0) {
@@ -68,10 +70,15 @@ static void initMatrix(Comm *c, Parameter *p, GMatrix *m) {
       commDistributeMatrix(c, &mm, &mmLocal);
       matrixConvertfromMM(&mmLocal, m);
     } else if (strcmp(dot, ".bmx") == 0) {
+#ifdef _MPI
       if (commIsMaster(c)) {
         printf("Read BMX matrix\n");
       }
       matrixBinRead(m, c, p->filename);
+#else
+      printf("Binary matrix files are only supported with MPI!\n");
+      exit(EXIT_SUCCESS);
+#endif
     } else {
       printf("Unknown matrix file format!\n");
     }
@@ -102,8 +109,13 @@ int main(int argc, char **argv) {
       commAbort(&comm, "Finish write matrix");
       break;
     case 'c':
+#ifdef _MPI
       writeBinMatrix(&comm, optarg);
       commAbort(&comm, "Finish write matrix");
+#else
+      printf("Binary matrix files are only supported with MPI!\n");
+      exit(EXIT_SUCCESS);
+#endif
     case 'f':
       readParameter(&param, optarg);
       break;
