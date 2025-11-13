@@ -1,7 +1,7 @@
 # Supported: GCC, CLANG, ICC
-TOOLCHAIN ?= ICC
+TOOLCHAIN ?= GCC
 # Supported CRS, SCS, CCRS
-MTX_FMT ?= CRS
+MTX_FMT ?= SCS
 ENABLE_MPI ?= true
 ENABLE_OPENMP ?= false
 FLOAT_TYPE ?= DP # SP for float, DP for double
