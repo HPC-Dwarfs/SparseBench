@@ -1,5 +1,5 @@
 # Supported: GCC, CLANG, ICC
-TOOLCHAIN ?= ICC
+TOOLCHAIN ?= CLANG
 # Supported CRS, SCS, CCRS
 MTX_FMT ?= CRS
 ENABLE_MPI ?= true
