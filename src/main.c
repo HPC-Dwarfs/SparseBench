@@ -85,7 +85,7 @@ static void initMatrix(Comm *c, Parameter *p, GMatrix *m) {
   }
 }
 
-int main(int argc, char **argv) {
+int main(const int argc, char **argv) {
   Parameter param;
   Comm comm;
 
@@ -93,7 +93,6 @@ int main(int argc, char **argv) {
   initParameter(&param);
 
   char *cvalue = NULL;
-  int index;
   int type = CG;
   bool stop = false;
   int c;
@@ -163,7 +162,7 @@ int main(int argc, char **argv) {
       abort();
     }
 
-  for (index = optind; index < argc; index++) {
+  for (int index = optind; index < argc; index++) {
     printf("Non-option argument %s\n", argv[index]);
   }
 
@@ -173,12 +172,12 @@ int main(int argc, char **argv) {
 
   commPrintBanner(&comm);
 
-  double timeStart, timeStop, ts;
+  double ts;
   GMatrix m;
-  timeStart = getTimeStamp();
+  double timeStart = getTimeStamp();
   initMatrix(&comm, &param, &m);
   commBarrier();
-  timeStop = getTimeStamp();
+  double timeStop = getTimeStamp();
   if (commIsMaster(&comm)) {
     printf("Init matrix took %.2fs\n", timeStop - timeStart);
   }
@@ -220,7 +219,7 @@ int main(int argc, char **argv) {
     if (commIsMaster(&comm)) {
       printf("Test type: SPMVM\n");
     }
-    int itermax = param.itermax;
+    const int itermax = param.itermax;
     CG_FLOAT *x =
         (CG_FLOAT *)allocate(ARRAY_ALIGNMENT, m.nc * sizeof(CG_FLOAT));
     CG_FLOAT *y =
@@ -241,6 +240,7 @@ int main(int argc, char **argv) {
     }
 
     break;
+  default:;
   }
 
   profilerPrint(&comm, k);
