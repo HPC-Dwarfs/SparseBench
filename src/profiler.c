@@ -9,19 +9,21 @@
 #include <stddef.h>
 
 typedef struct {
-  char* label;
+  char *label;
   size_t words;
   size_t flops;
 } workType;
 
 double _t[NUMREGIONS];
 
-static workType _regions[NUMREGIONS] = { { "waxpby:  ", 3, 6 },
+static workType _regions[NUMREGIONS] = {
+  { "waxpby:  ", 3, 6 },
   { "spMVM:   ", 0, 2 },
   { "ddot:    ", 2, 4 },
-  { "comm:    ", 0, 0 } };
+  { "comm:    ", 0, 0 }
+};
 
-void profilerInit(size_t* facFlops, size_t* facWords)
+void profilerInit(size_t *facFlops, size_t *facWords)
 {
   LIKWID_MARKER_INIT;
   _Pragma("omp parallel")
@@ -41,7 +43,7 @@ void profilerInit(size_t* facFlops, size_t* facWords)
   _regions[SPMVM].words = facWords[SPMVM];
 }
 
-void profilerPrint(Comm* c, int iterations)
+void profilerPrint(CommType *c, int iterations)
 {
 
   if (c->size > 1) {
@@ -68,23 +70,9 @@ void profilerPrint(Comm* c, int iterations)
 
     _regions[COMM].words = sizeof(CG_FLOAT) * commWords;
     int commVolume[c->size];
-    MPI_Gather(&commWords,
-        1,
-        MPI_INT,
-        commVolume,
-        1,
-        MPI_INT,
-        0,
-        MPI_COMM_WORLD);
+    MPI_Gather(&commWords, 1, MPI_INT, commVolume, 1, MPI_INT, 0, MPI_COMM_WORLD);
     double commTime[c->size];
-    MPI_Gather(&_t[COMM],
-        1,
-        MPI_DOUBLE,
-        commTime,
-        1,
-        MPI_DOUBLE,
-        0,
-        MPI_COMM_WORLD);
+    MPI_Gather(&_t[COMM], 1, MPI_DOUBLE, commTime, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     if (commIsMaster(c)) {
       printf(HLINE);
@@ -140,4 +128,7 @@ void profilerPrint(Comm* c, int iterations)
   }
 }
 
-void profilerFinalize(void) { LIKWID_MARKER_CLOSE; }
+void profilerFinalize(void)
+{
+  LIKWID_MARKER_CLOSE;
+}

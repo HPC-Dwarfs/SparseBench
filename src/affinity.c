@@ -11,9 +11,9 @@
 #include <unistd.h>
 
 #define MAX_NUM_THREADS 128
-#define gettid()        syscall(SYS_gettid)
+#define gettid() syscall(SYS_gettid)
 
-static int getProcessorID(cpu_set_t* cpu_set)
+static int getProcessorID(cpu_set_t *cpu_set)
 {
   int processorId;
 

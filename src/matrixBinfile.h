@@ -18,7 +18,7 @@ typedef struct {
 // array of size <number of rows>[<row offset>]
 // array of size <number of non zeroes>[<<col id>,<value>>]
 
-extern void matrixBinWrite(GMatrix* m, Comm* c, char* filename);
-extern void matrixBinRead(GMatrix* m, Comm* c, char* filename);
+extern void matrixBinWrite(GMatrix *m, CommType *c, char *filename);
+extern void matrixBinRead(GMatrix *m, CommType *c, char *filename);
 
 #endif // __MATRIXBINFILE_H_

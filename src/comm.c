@@ -37,7 +37,7 @@ static int sizeOfRank(int rank, int size, int N)
   return (N / size) + ((N % size > rank) ? 1 : 0);
 }
 
-static void buildIndexMapping(Comm *c,
+static void buildIndexMapping(CommType *c,
     GMatrix *A,
     Bstree *externals,
     int *externalIndex,
@@ -112,7 +112,7 @@ static void buildIndexMapping(Comm *c,
 }
 
 static void buildElementsToSend(
-    Comm *c, int startRow, int *externalRank, int *externalReordered)
+    CommType *c, int startRow, int *externalRank, int *externalReordered)
 {
   c->totalSendCount = 0;
   for (int i = 0; i < c->outdegree; i++) {
@@ -176,7 +176,7 @@ static void buildElementsToSend(
 }
 #endif
 
-void commPrintBanner(Comm *c)
+void commPrintBanner(CommType *c)
 {
   int rank = c->rank;
   int size = c->size;
@@ -287,7 +287,7 @@ static void scanMM(
   }
 }
 
-static void dumpMMMatrix(Comm *c, MMMatrix *mm)
+static void dumpMMMatrix(CommType *c, MMMatrix *mm)
 {
   MMEntry *entries = mm->entries;
 
@@ -296,7 +296,7 @@ static void dumpMMMatrix(Comm *c, MMMatrix *mm)
   }
 }
 
-void commDistributeMatrix(Comm *c, MMMatrix *m, MMMatrix *mLocal)
+void commDistributeMatrix(CommType *c, MMMatrix *m, MMMatrix *mLocal)
 {
 #ifdef _MPI
   int rank = c->rank;
@@ -398,7 +398,7 @@ void commDistributeMatrix(Comm *c, MMMatrix *m, MMMatrix *mLocal)
 #endif /* ifdef _MPI */
 }
 
-void commPartition(Comm *c, GMatrix *A)
+void commPartition(CommType *c, GMatrix *A)
 {
 #ifdef _MPI
   int rank             = c->rank;
@@ -524,13 +524,12 @@ void commPartition(Comm *c, GMatrix *A)
         weights,
         MPI_INFO_NULL,
         0,
-        &c->communicator);
+        &c->comm);
   }
 
   {
     int weighted;
-    MPI_Dist_graph_neighbors_count(
-        c->communicator, &c->indegree, &c->outdegree, &weighted);
+    MPI_Dist_graph_neighbors_count(c->comm, &c->indegree, &c->outdegree, &weighted);
 
 #ifdef VERBOSE
     printf(
@@ -544,7 +543,7 @@ void commPartition(Comm *c, GMatrix *A)
     c->sendCounts   = (int *)malloc(c->outdegree * sizeof(int));
     c->sdispls      = (int *)malloc(c->outdegree * sizeof(int));
 
-    MPI_Dist_graph_neighbors(c->communicator,
+    MPI_Dist_graph_neighbors(c->comm,
         c->indegree,
         c->sources,
         c->recvCounts,
@@ -588,7 +587,7 @@ void commPartition(Comm *c, GMatrix *A)
 #endif
 }
 
-void commExchange(Comm *c, CG_UINT numRows, CG_FLOAT *x)
+void commExchange(CommType *c, CG_UINT numRows, CG_FLOAT *x)
 {
 #ifdef _MPI
   CG_FLOAT *sendBuffer = c->sendBuffer;
@@ -609,7 +608,7 @@ void commExchange(Comm *c, CG_UINT numRows, CG_FLOAT *x)
       c->recvCounts,
       c->rdispls,
       MPI_FLOAT_TYPE,
-      c->communicator);
+      c->comm);
 
 #endif
 }
@@ -625,7 +624,8 @@ void commReduction(CG_FLOAT *v, int op)
 #endif
 }
 
-void commPrintConfig(Comm *c, CG_UINT nr, CG_UINT nnz, CG_UINT startRow, CG_UINT stopRow)
+void commPrintConfig(
+    CommType *c, CG_UINT nr, CG_UINT nnz, CG_UINT startRow, CG_UINT stopRow)
 {
 #ifdef _MPI
   fflush(stdout);
@@ -677,7 +677,7 @@ void commPrintConfig(Comm *c, CG_UINT nr, CG_UINT nnz, CG_UINT startRow, CG_UINT
 #endif
 }
 
-void commMatrixDump(Comm *c, Matrix *m)
+void commMatrixDump(CommType *c, Matrix *m)
 {
   int rank = c->rank;
   int size = c->size;
@@ -765,7 +765,7 @@ void commMatrixDump(Comm *c, Matrix *m)
 #endif /* ifdef SCS */
 }
 
-void commVectorDump(Comm *c, CG_FLOAT *v, CG_UINT size, char *name)
+void commVectorDump(CommType *c, CG_FLOAT *v, CG_UINT size, char *name)
 {
   for (int i = 0; i < c->size; i++) {
     if (i == c->rank) {
@@ -780,7 +780,7 @@ void commVectorDump(Comm *c, CG_FLOAT *v, CG_UINT size, char *name)
   }
 }
 
-void commGMatrixDump(Comm *c, GMatrix *m)
+void commGMatrixDump(CommType *c, GMatrix *m)
 {
   int rank        = c->rank;
   int size        = c->size;
@@ -818,7 +818,7 @@ void commGMatrixDump(Comm *c, GMatrix *m)
   }
 }
 
-void commInit(Comm *c, int argc, char **argv)
+void commInit(CommType *c, int argc, char **argv)
 {
 #ifdef _MPI
   MPI_Init(&argc, &argv);
@@ -835,7 +835,7 @@ void commInit(Comm *c, int argc, char **argv)
 #endif
 }
 
-void commAbort(Comm *c, char *msg)
+void commAbort(CommType *c, char *msg)
 {
   printf("Abort: %s\n", msg);
 #if defined(_MPI)
@@ -848,7 +848,7 @@ void commAbort(Comm *c, char *msg)
   exit(EXIT_SUCCESS);
 }
 
-void commFinalize(Comm *c)
+void commFinalize(CommType *c)
 {
 #ifdef _MPI
   free(c->sources);
