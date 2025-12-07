@@ -113,8 +113,7 @@ static void buildIndexMapping(Comm *c,
   free(newExternalRank);
 }
 
-static void buildElementsToSend(
-    Comm *c, int startRow, int *externalRank, int *externalReordered)
+static void buildElementsToSend(Comm *c, int startRow, int *externalReordered)
 {
   c->totalSendCount = 0;
   for (int i = 0; i < c->outdegree; i++) {
@@ -320,7 +319,7 @@ static void createMMEntryDatatype(MPI_Datatype *entryType)
 }
 
 static void calculateMMSendCounts(
-    Comm *c, MMMatrix *m, int size, int totalNr, int *sendcounts, int *senddispls)
+    MMMatrix *m, int size, int totalNr, int *sendcounts, int *senddispls)
 {
   int cursor = 0;
   for (int i = 0; i < size; i++) {
@@ -365,7 +364,7 @@ void commDistributeMatrix(Comm *c, MMMatrix *m, MMMatrix *mLocal)
   int senddispls[size];
 
   if (commIsMaster(c)) {
-    calculateMMSendCounts(c, m, size, totalNr, sendcounts, senddispls);
+    calculateMMSendCounts(m, size, totalNr, sendcounts, senddispls);
   }
 
   int count;
@@ -631,7 +630,7 @@ void commPartition(Comm *c, GMatrix *m)
   /***********************************************************************
    *    Step 4:  Build global index list for external communication
    ************************************************************************/
-  buildElementsToSend(c, (int)m->startRow, externalRank, externalsReordered);
+  buildElementsToSend(c, (int)m->startRow, externalsReordered);
 
   free(externalsReordered);
   free(externalRank);
