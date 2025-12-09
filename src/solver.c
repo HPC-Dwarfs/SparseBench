@@ -15,10 +15,10 @@
 
 void waxpby(const CG_UINT n,
     const CG_FLOAT alpha,
-    const CG_FLOAT* restrict x,
+    const CG_FLOAT *restrict x,
     const CG_FLOAT beta,
-    const CG_FLOAT* restrict y,
-    CG_FLOAT* const w)
+    const CG_FLOAT *restrict y,
+    CG_FLOAT *const w)
 {
   if (alpha == 1.0) {
 #pragma omp parallel for schedule(static)
@@ -39,9 +39,9 @@ void waxpby(const CG_UINT n,
 }
 
 void ddot(const CG_UINT n,
-    const CG_FLOAT* restrict x,
-    const CG_FLOAT* restrict y,
-    CG_FLOAT* restrict result)
+    const CG_FLOAT *restrict x,
+    const CG_FLOAT *restrict y,
+    CG_FLOAT *restrict result)
 {
   CG_FLOAT sum = 0.0;
 

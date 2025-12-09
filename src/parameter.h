@@ -6,15 +6,15 @@
 #define __PARAMETER_H_
 
 typedef struct {
-  char* filename;
+  char *filename;
   int nx, ny, nz;
   int itermax;
   double eps;
 } Parameter;
 
-void initParameter(Parameter*);
-void readParameter(Parameter*, const char*);
-void printParameter(Parameter*);
+void initParameter(Parameter *);
+void readParameter(Parameter *, const char *);
+void printParameter(Parameter *);
 
 #ifdef CRS
 #define FMT "CRS"
