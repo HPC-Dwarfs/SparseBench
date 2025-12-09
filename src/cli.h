@@ -32,6 +32,6 @@ extern int BenchType;
   "  -i <int>   Number of solver iterations. Default 150.\n"                             \
   "  -e <float>  Convergence criteria epsilon. Default 0.0.\n"
 
-extern void parseArguments(Comm *, Parameter *, int, char **);
+extern void parseArguments(CommType *, Parameter *, int, char **);
 
 #endif /*CLI_H*/

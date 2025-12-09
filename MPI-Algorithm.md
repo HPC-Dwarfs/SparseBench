@@ -31,6 +31,19 @@ column indices in the matrix accordingly.
   used.
 - Wait for all non blocking receive calls to complete.
 
+## Communication data structure
+
+- `totalSendCount`: Total number of elements to send for all receivers
+- `elementsToSend[totalSendCount]`: Local element ids to send for all receivers
+- `indegree`: Number of ranks we receive messages from
+- `outdegree`: Number of ranks we send messages to
+- `sources[indegree]`: List of ranks we receive messages from
+- `recvCounts[indegree]`: Message counts for messages we receive from senders
+- `rdispls[indegree]`: Displacements in receive buffer
+- `destinations[outdegree]`: List of ranks we send messages to
+- `sendCounts[outdegree]`: Message counts for messages we send to receivers
+- `sdispls[outdegree]`: Displacements in send buffer
+
 ## Partitioning
 
 The matrix has to be distributed. Every rank gets a consecutive number of rows.
@@ -47,7 +60,6 @@ converted to a local column ordering.
 - Determine if an index targets a local or external value
 - If local, subtract start row id from index to get local index
 - If external, check if it was already taken care for:
-
   - If yes, do nothing
   - otherwise
     - add it to a list of external indices
@@ -78,35 +90,12 @@ Generate a local ordering for externals, starting at the end of the local
 elements. Give all indices belonging to same rank consecutive ids. Map all
 external column ids in matrix to new local index.
 
-- `externalLocalIndex` SIZE `externalCount` temporary: Local compacted index for
-  every external. Consecutive ids for elements owned by same rank.
-- `externalReordered` SIZE `externalCount` temporary: Map from external
-  new local id to global id
+- `externalLocalIndex` SIZE `externalCount` temporary: Local compacted RHS
+  index for every external. Consecutive ids for elements owned by same rank.
+- `externalReordered` SIZE `externalCount` temporary: Mapping for newly
+  ordered externals to global id
 
-### Step 4 Build list of neighbor ranks
-
-Subroutine `buildNeighborlist`:
-Generate a list that encodes how many ranks need values from a rank and the
-total number of values that need to be sent.
-Make a list of the neighbors that will send information to update our
-external elements (in the order that we will receive this information).
-Create one neighbor list for both send and receive.
-
-- `neighborCount` persistent: Number of communication neighbors
-- `neighbors` SIZE `neighborCount` persistent: All ranks that need to communicate
-  with the current rank
-
-### Step 5 Build message counts for all communication partners
-
-Subroutine `buildMessageCounts`:
-Setup send and receive counts for all neighbors of rank.
-
-- `recvCount` SIZE `neighborCount` persistent: Receive message sizes for every
-  communication partner
-- `sendCount` SIZE `neighborCount` persistent: Send message sizes for every
-  communication partner
-
-### Step 6 Build global index list for external communication
+### Step 4 Build global index list for external communication
 
 Subroutine `buildElementsToSend`:
 Send the global external indices in the order the current rank requires them.

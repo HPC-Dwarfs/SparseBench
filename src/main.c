@@ -20,7 +20,7 @@
 #include "timing.h"
 #include "util.h"
 
-static void initMatrix(Comm *c, Parameter *p, GMatrix *m)
+static void initMatrix(CommType *c, Parameter *p, GMatrix *m)
 {
   if (strcmp(p->filename, "generate") == 0) {
     matrixGenerate(m, p, c->rank, c->size, false);
@@ -58,7 +58,7 @@ static void initMatrix(Comm *c, Parameter *p, GMatrix *m)
 int main(int argc, char **argv)
 {
   Parameter param;
-  Comm comm;
+  CommType comm;
 
   commInit(&comm, argc, argv);
   initParameter(&param);
@@ -75,8 +75,7 @@ int main(int argc, char **argv)
     printf("Init matrix took %.2fs\n", timeStop - timeStart);
   }
   timeStart = getTimeStamp();
-  commPartition(&comm, &m);
-  // commPrintConfig(&comm, m.nr, m.nnz, m.startRow, m.stopRow);
+  commLocalization(&comm, &m);
 
   Matrix sm;
   convertMatrix(&sm, &m);

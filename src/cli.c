@@ -19,7 +19,7 @@
 int BenchType = CG;
 
 #ifdef _MPI
-static void writeBinMatrix(Comm *c, char *filename)
+static void writeBinMatrix(CommType *c, char *filename)
 {
   MMMatrix mm;
   MMMatrix mmLocal;
@@ -33,7 +33,7 @@ static void writeBinMatrix(Comm *c, char *filename)
 }
 #endif
 
-void parseArguments(Comm *comm, Parameter *param, int argc, char **argv)
+void parseArguments(CommType *comm, Parameter *param, int argc, char **argv)
 {
   char *cvalue = NULL;
   int index;
