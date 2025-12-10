@@ -23,10 +23,6 @@
 #include <omp.h>
 #endif
 
-#ifdef _MPI
-#include <mpi.h>
-#endif
-
 #include "allocate.h"
 #include "bstree.h"
 #include "comm.h"
@@ -34,56 +30,54 @@
 #define MPI_TAG_EXCHANGE 100
 
 #ifdef _MPI
+#include <mpi.h>
+
 static int sizeOfRank(int rank, int size, int N)
 {
   return (N / size) + ((N % size > rank) ? 1 : 0);
 }
 
-static void buildIndexMapping(GMatrix *A,
-    Bstree *externals,
-    const int externalCount,
-    const int *externalIndex,
-    int *externalsReordered,
-    int *externalRank)
+static void reorderExternals(
+    const int numRows, const int extCount, int *extLocalIndex, int *extOwningRank)
 {
   /*Go through the external elements. For each newly encountered external
   assign it the next index in the local sequence. Then look for other
   external elements who are updated by the same rank and assign them the next
   set of index numbers in the local sequence (ie. elements updated by the same
   rank have consecutive indices).*/
-  int *externalLocalIndex = (int *)allocate(ARRAY_ALIGNMENT, externalCount * sizeof(int));
-  int *newExternalRank    = (int *)allocate(ARRAY_ALIGNMENT, externalCount * sizeof(int));
+  int *newExtOwningRank = (int *)allocate(ARRAY_ALIGNMENT, extCount * sizeof(int));
 
-  for (int i = 0; i < externalCount; i++) {
-    externalLocalIndex[i] = -1;
+  for (int i = 0; i < extCount; i++) {
+    extLocalIndex[i] = -1;
   }
 
-  int count = (int)A->nr;
+  int count = numRows;
   int index = 0;
 
-  for (int i = 0; i < externalCount; i++) {
-    if (externalLocalIndex[i] == -1) {
-      externalLocalIndex[i]    = count++;
-      newExternalRank[index++] = externalRank[i];
+  for (int i = 0; i < extCount; i++) {
+    if (extLocalIndex[i] == -1) {
+      extLocalIndex[i]          = count++;
+      newExtOwningRank[index++] = extOwningRank[i];
 
-      for (int j = i + 1; j < externalCount; j++) {
-        if (externalRank[j] == externalRank[i]) {
-          externalLocalIndex[j]    = count++;
-          newExternalRank[index++] = externalRank[j];
+      for (int j = i + 1; j < extCount; j++) {
+        if (extOwningRank[j] == extOwningRank[i]) {
+          extLocalIndex[j]          = count++;
+          newExtOwningRank[index++] = extOwningRank[j];
         }
       }
     }
   }
 
-#ifdef VERBOSE
-  FPRINTF(c->logFile, "REORDER last index %d\n", index);
-#endif
-
-  // Update externalRank for new ordering
-  for (int i = 0; i < externalCount; i++) {
-    externalRank[i] = newExternalRank[i];
+  // Update externalOwningRank for new ordering
+  for (int i = 0; i < extCount; i++) {
+    extOwningRank[i] = newExtOwningRank[i];
   }
 
+  free(newExtOwningRank);
+}
+
+static void localizeMatrix(GMatrix *A, Bstree *extLookup, const int *extLocalIndex)
+{
   CG_UINT *rowPtr  = A->rowPtr;
   Entry *entries   = A->entries;
   CG_UINT numRows  = A->nr;
@@ -98,20 +92,13 @@ static void buildIndexMapping(GMatrix *A,
       if (startRow <= curIndex && curIndex <= stopRow) {
         entries[j].col -= startRow;
       } else {
-        entries[j].col = externalLocalIndex[bstFind(externals, curIndex)];
+        entries[j].col = extLocalIndex[bstFind(extLookup, curIndex)];
       }
     }
   }
-
-  for (int i = 0; i < externalCount; i++) {
-    externalsReordered[externalLocalIndex[i] - numRows] = externalIndex[i];
-  }
-
-  free(externalLocalIndex);
-  free(newExternalRank);
 }
 
-static void buildElementsToSend(CommType *c, int startRow, int *externalReordered)
+static void buildElementsToSend(CommType *c, int startRow, int *extLocalToGlobalReordered)
 {
   c->totalSendCount = 0;
   for (int i = 0; i < c->outdegree; i++) {
@@ -143,7 +130,7 @@ static void buildElementsToSend(CommType *c, int startRow, int *externalReordere
 
   for (int i = 0; i < c->indegree; i++) {
     c->rdispls[i] = j;
-    MPI_Send(externalReordered + j,
+    MPI_Send(extLocalToGlobalReordered + j,
         c->recvCounts[i],
         MPI_INT,
         c->sources[i],
@@ -173,97 +160,6 @@ static void buildElementsToSend(CommType *c, int startRow, int *externalReordere
 #endif //VERBOSE
 }
 #endif //MPI
-
-void commPrintBanner(CommType *c)
-{
-  int rank = c->rank;
-  int size = c->size;
-
-  char host[_POSIX_HOST_NAME_MAX];
-  pid_t masterPid = getpid();
-  if (gethostname(host, _POSIX_HOST_NAME_MAX) != 0) {
-    snprintf(host, sizeof(host), "unknown");
-  }
-
-  if (c->size > 1) {
-    if (commIsMaster(c)) {
-      printf(BANNER "\n");
-      printf("Using %s matrix format, %s precision floats and integer type %s\n\n",
-          FMT,
-          PRECISION_STRING,
-          UINT_STRING);
-      printf("MPI parallel using %d ranks\n", c->size);
-#ifdef _OPENMP
-#pragma omp parallel
-      {
-#pragma omp single
-        printf("OpenMP enabled using %d threads\n", omp_get_num_threads());
-      }
-#endif
-    }
-    commBarrier();
-    for (int i = 0; i < size; i++) {
-      if (i == rank) {
-        printf("Process with rank %d running on Node %s with pid %d\n",
-            rank,
-            host,
-            masterPid);
-      }
-
-#ifdef VERBOSE_AFFINITY
-#ifdef _OPENMP
-#pragma omp parallel
-      {
-#pragma omp critical
-        {
-          printf("Rank %d Thread %d running on Node %s core %d with pid %d "
-                 "and tid "
-                 "%d\n",
-              rank,
-              omp_get_thread_num(),
-              host,
-              sched_getcpu(),
-              master_pid,
-              gettid());
-          affinity_getmask();
-        }
-#endif
-      }
-#endif
-    }
-    commBarrier();
-  } else {
-    printf(BANNER "\n");
-    printf("Using %s matrix format, %s precision floats and integer type %s\n\n",
-        FMT,
-        PRECISION_STRING,
-        UINT_STRING);
-    printf("Running with only one process!\n");
-#ifdef _OPENMP
-#pragma omp parallel
-    {
-#pragma omp single
-      printf("OpenMP enabled using %d threads\n", omp_get_num_threads());
-
-#ifdef VERBOSE_AFFINITY
-#pragma omp critical
-      {
-        printf("Rank %d Thread %d running on Node %s core %d with pid %d "
-               "and tid "
-               "%d\n",
-            rank,
-            omp_get_thread_num(),
-            host,
-            sched_getcpu(),
-            master_pid,
-            gettid());
-        affinity_getmask();
-      }
-#endif
-    }
-#endif
-  }
-}
 
 static void scanMM(
     MMMatrix *m, int startRow, int stopRow, int *entryCount, int *entryOffset)
@@ -335,7 +231,241 @@ static void calculateMMSendCounts(
         stopRow);
   }
 }
+
+static int identifyExternals(
+    CommType *c, GMatrix *A, Bstree *extLookup, int *extLocalToGlobal)
+{
+  CG_UINT *rowPtr   = A->rowPtr;
+  Entry *entries    = A->entries;
+  CG_UINT numRows   = A->nr;
+  CG_UINT startRow  = A->startRow;
+  CG_UINT stopRow   = A->stopRow;
+  int externalCount = 0;
+
+#ifdef VERBOSE
+  FPRINTF(c->logFile, "STEP 1 \n");
 #endif
+  for (int i = 0; i < numRows; i++) {
+    for (CG_UINT j = rowPtr[i]; j < rowPtr[i + 1]; j++) {
+      CG_UINT curIndex = entries[j].col;
+
+      // convert local column references to local numbering
+      if (curIndex < startRow || curIndex > stopRow) {
+        // find out if we have already set up this point
+        if (!bstExists(extLookup, curIndex)) {
+          bstInsert(extLookup, curIndex, externalCount);
+
+          if (externalCount < MAX_EXTERNAL) {
+            extLocalToGlobal[externalCount] = (int)curIndex;
+          } else {
+            commAbort(c, "Must increase MAX_EXTERNAL");
+          }
+          externalCount++;
+        }
+      }
+    }
+  }
+#ifdef VERBOSE
+  printf("Rank %d: %d externals\n", c->rank, externalCount);
+#endif
+  return externalCount;
+}
+
+static int findExternalOwningRanks(CommType *c,
+    const int startRow,
+    const int *extLocalToGlobal,
+    const int extCount,
+    int *recvFromNeighbors,
+    int *extOwningRank)
+{
+  int size = c->size;
+
+  for (int i = 0; i < size; i++) {
+    recvFromNeighbors[i] = -1;
+  }
+
+  int globalIndexOffsets[size];
+  int sourceCount = 0;
+
+  MPI_Allgather(&startRow, 1, MPI_INT, globalIndexOffsets, 1, MPI_INT, MPI_COMM_WORLD);
+
+  // Go through list of externals and find the processor that owns it
+  for (int i = 0; i < extCount; i++) {
+    int globalIndex = extLocalToGlobal[i];
+
+    for (int j = size - 1; j >= 0; j--) {
+      if (globalIndexOffsets[j] <= globalIndex) {
+        extOwningRank[i] = j;
+        if (recvFromNeighbors[j] < 0) {
+          recvFromNeighbors[j] = 1;
+          sourceCount++;
+        } else {
+          recvFromNeighbors[j]++;
+        }
+        break;
+      }
+    }
+  }
+
+  return sourceCount;
+}
+
+static void setupTopology(
+    CommType *c, const int sourceCount, const int *recvFromNeighbors)
+{
+  int sources[sourceCount];
+  int degrees[sourceCount];
+  int destinations[sourceCount];
+  int weights[sourceCount];
+  int cursor = 0;
+  int size   = c->size;
+
+  // setup source nodes and element counts
+  for (int i = 0; i < size; i++) {
+    if (recvFromNeighbors[i] > 0) {
+      sources[cursor]   = i;
+      weights[cursor++] = recvFromNeighbors[i];
+    }
+  }
+
+  // setup incoming edges
+  for (int i = 0; i < sourceCount; i++) {
+    degrees[i]      = 1;
+    destinations[i] = c->rank;
+  }
+
+  MPI_Dist_graph_create(MPI_COMM_WORLD,
+      sourceCount,
+      sources,
+      degrees,
+      destinations,
+      weights,
+      MPI_INFO_NULL,
+      0,
+      &c->communicator);
+}
+
+static void retrieveTopology(CommType *c)
+{
+  int weighted;
+  MPI_Dist_graph_neighbors_count(c->communicator, &c->indegree, &c->outdegree, &weighted);
+
+#ifdef VERBOSE
+  printf("Rank %d: In %d Out %d Weighted %d\n",
+      c->rank,
+      c->indegree,
+      c->outdegree,
+      weighted);
+#endif
+
+  c->sources      = (int *)allocate(ARRAY_ALIGNMENT, c->indegree * sizeof(int));
+  c->recvCounts   = (int *)allocate(ARRAY_ALIGNMENT, c->indegree * sizeof(int));
+  c->rdispls      = (int *)allocate(ARRAY_ALIGNMENT, c->indegree * sizeof(int));
+  c->destinations = (int *)allocate(ARRAY_ALIGNMENT, c->outdegree * sizeof(int));
+  c->sendCounts   = (int *)allocate(ARRAY_ALIGNMENT, c->outdegree * sizeof(int));
+  c->sdispls      = (int *)allocate(ARRAY_ALIGNMENT, c->outdegree * sizeof(int));
+
+  MPI_Dist_graph_neighbors(c->communicator,
+      c->indegree,
+      c->sources,
+      c->recvCounts,
+      c->outdegree,
+      c->destinations,
+      c->sendCounts);
+}
+
+#endif //MPI
+
+void commPrintBanner(CommType *c)
+{
+  int rank = c->rank;
+  int size = c->size;
+
+  char host[_POSIX_HOST_NAME_MAX];
+  pid_t masterPid = getpid();
+  if (gethostname(host, _POSIX_HOST_NAME_MAX) != 0) {
+    snprintf(host, sizeof(host), "unknown");
+  }
+
+  if (c->size > 1) {
+    if (commIsMaster(c)) {
+      printf(BANNER "\n");
+      printf("Using %s matrix format, %s precision floats and integer type %s\n\n",
+          FMT,
+          PRECISION_STRING,
+          UINT_STRING);
+      printf("MPI parallel using %d ranks\n", c->size);
+#ifdef _OPENMP
+#pragma omp parallel
+      {
+#pragma omp single
+        printf("OpenMP enabled using %d threads\n", omp_get_num_threads());
+      }
+#endif
+    }
+    commBarrier();
+    for (int i = 0; i < size; i++) {
+      if (i == rank) {
+        printf("Process with rank %d running on Node %s with pid %d\n",
+            rank,
+            host,
+            masterPid);
+      }
+
+#ifdef VERBOSE_AFFINITY
+#ifdef _OPENMP
+#pragma omp parallel
+      {
+#pragma omp critical
+        {
+          printf("Rank %d Thread %d running on Node %s core %d with pid %d "
+                 "and tid "
+                 "%d\n",
+              rank,
+              omp_get_thread_num(),
+              host,
+              sched_getcpu(),
+              master_pid,
+              gettid());
+          affinity_getmask();
+        }
+#endif
+      }
+#endif //VERBOSE_AFFINITY
+    }
+    commBarrier();
+  } else {
+    printf(BANNER "\n");
+    printf("Using %s matrix format, %s precision floats and integer type %s\n\n",
+        FMT,
+        PRECISION_STRING,
+        UINT_STRING);
+    printf("Running with only one process!\n");
+#ifdef _OPENMP
+#pragma omp parallel
+    {
+#pragma omp single
+      printf("OpenMP enabled using %d threads\n", omp_get_num_threads());
+
+#ifdef VERBOSE_AFFINITY
+#pragma omp critical
+      {
+        printf("Rank %d Thread %d running on Node %s core %d with pid %d "
+               "and tid "
+               "%d\n",
+            rank,
+            omp_get_thread_num(),
+            host,
+            sched_getcpu(),
+            master_pid,
+            gettid());
+        affinity_getmask();
+      }
+#endif
+    }
+#endif //_OPENMP
+  }
+}
 
 void commDistributeMatrix(CommType *c, MMMatrix *m, MMMatrix *mLocal)
 {
@@ -416,147 +546,6 @@ void commDistributeMatrix(CommType *c, MMMatrix *m, MMMatrix *mLocal)
 #endif /* ifdef _MPI */
 }
 
-#ifdef _MPI
-static int identifyExternals(
-    CommType *c, GMatrix *A, Bstree *externals, int *externalIndex)
-{
-  CG_UINT *rowPtr  = A->rowPtr;
-  Entry *entries   = A->entries;
-  CG_UINT numRows  = A->nr;
-  CG_UINT startRow = A->startRow;
-  CG_UINT stopRow  = A->stopRow;
-  int count        = 0;
-
-#ifdef VERBOSE
-  FPRINTF(c->logFile, "STEP 1 \n");
-#endif
-  for (int i = 0; i < numRows; i++) {
-    for (CG_UINT j = rowPtr[i]; j < rowPtr[i + 1]; j++) {
-      CG_UINT curIndex = entries[j].col;
-
-      // convert local column references to local numbering
-      if (curIndex < startRow || curIndex > stopRow) {
-        // find out if we have already set up this point
-        if (!bstExists(externals, curIndex)) {
-          bstInsert(externals, curIndex, count);
-
-          if (count < MAX_EXTERNAL) {
-            externalIndex[count] = (int)curIndex;
-          } else {
-            commAbort(c, "Must increase MAX_EXTERNAL");
-          }
-          count++;
-        }
-      }
-    }
-  }
-#ifdef VERBOSE
-  printf("Rank %d: %d externals\n", c->rank, count);
-#endif
-  return count;
-}
-
-static int findExternalRanks(CommType *c,
-    const int startRow,
-    const int *externalIndex,
-    const int externalCount,
-    int *recvNeighbors,
-    int *externalRank)
-{
-  int size = c->size;
-
-  for (int i = 0; i < size; i++) {
-    recvNeighbors[i] = -1;
-  }
-
-  int globalIndexOffsets[size];
-  int sourceCount = 0;
-
-  MPI_Allgather(&startRow, 1, MPI_INT, globalIndexOffsets, 1, MPI_INT, MPI_COMM_WORLD);
-
-  // Go through list of externals and find the processor that owns it
-  for (int i = 0; i < externalCount; i++) {
-    int globalIndex = externalIndex[i];
-
-    for (int j = size - 1; j >= 0; j--) {
-      if (globalIndexOffsets[j] <= globalIndex) {
-        externalRank[i] = j;
-        if (recvNeighbors[j] < 0) {
-          recvNeighbors[j] = 1;
-          sourceCount++;
-        } else {
-          recvNeighbors[j]++;
-        }
-        break;
-      }
-    }
-  }
-
-  return sourceCount;
-}
-
-static void setupTopology(CommType *c, const int sourceCount, const int *recvNeighbors)
-{
-  int sources[sourceCount];
-  int degrees[sourceCount];
-  int destinations[sourceCount];
-  int weights[sourceCount];
-  int cursor = 0;
-  int size   = c->size;
-
-  for (int i = 0; i < size; i++) {
-    if (recvNeighbors[i] > 0) {
-      sources[cursor]   = i;
-      weights[cursor++] = recvNeighbors[i];
-    }
-  }
-
-  for (int i = 0; i < sourceCount; i++) {
-    degrees[i]      = 1;
-    destinations[i] = c->rank;
-  }
-
-  MPI_Dist_graph_create(MPI_COMM_WORLD,
-      sourceCount,
-      sources,
-      degrees,
-      destinations,
-      weights,
-      MPI_INFO_NULL,
-      0,
-      &c->communicator);
-}
-
-static void retrieveTopology(CommType *c)
-{
-  int weighted;
-  MPI_Dist_graph_neighbors_count(c->communicator, &c->indegree, &c->outdegree, &weighted);
-
-#ifdef VERBOSE
-  printf("Rank %d: In %d Out %d Weighted %d\n",
-      c->rank,
-      c->indegree,
-      c->outdegree,
-      weighted);
-#endif
-
-  c->sources      = (int *)allocate(ARRAY_ALIGNMENT, c->indegree * sizeof(int));
-  c->recvCounts   = (int *)allocate(ARRAY_ALIGNMENT, c->indegree * sizeof(int));
-  c->rdispls      = (int *)allocate(ARRAY_ALIGNMENT, c->indegree * sizeof(int));
-  c->destinations = (int *)allocate(ARRAY_ALIGNMENT, c->outdegree * sizeof(int));
-  c->sendCounts   = (int *)allocate(ARRAY_ALIGNMENT, c->outdegree * sizeof(int));
-  c->sdispls      = (int *)allocate(ARRAY_ALIGNMENT, c->outdegree * sizeof(int));
-
-  MPI_Dist_graph_neighbors(c->communicator,
-      c->indegree,
-      c->sources,
-      c->recvCounts,
-      c->outdegree,
-      c->destinations,
-      c->sendCounts);
-}
-#endif
-
 void commLocalization(CommType *c, GMatrix *m)
 {
 #ifdef _MPI
@@ -578,57 +567,70 @@ void commLocalization(CommType *c, GMatrix *m)
   /***********************************************************************
    *    Step 1: Identify externals and create external lookup
    ************************************************************************/
-  Bstree *externals  = bstNew();
-  int *externalIndex = (int *)allocate(ARRAY_ALIGNMENT, MAX_EXTERNAL * sizeof(int));
-  int externalCount  = identifyExternals(c, m, externals, externalIndex);
+  Bstree *extLookup     = bstNew();
+  int *extLocalToGlobal = (int *)allocate(ARRAY_ALIGNMENT, MAX_EXTERNAL * sizeof(int));
+  int extCount          = identifyExternals(c, m, extLookup, extLocalToGlobal);
 
   /***********************************************************************
-   *    Step 2:  Build dist Graph topology and init neigbors
+   *    Step 2:  Build dist Graph topology and init incoming edges
    ************************************************************************/
-  int *externalRank  = (int *)allocate(ARRAY_ALIGNMENT, externalCount * sizeof(int));
-  int *recvNeighbors = (int *)allocate(ARRAY_ALIGNMENT, size * sizeof(int));
+  int *extOwningRank     = (int *)allocate(ARRAY_ALIGNMENT, extCount * sizeof(int));
+  int *recvFromNeighbors = (int *)allocate(ARRAY_ALIGNMENT, size * sizeof(int));
 
-  int sourceCount    = findExternalRanks(
-      c, (int)m->startRow, externalIndex, externalCount, recvNeighbors, externalRank);
-  setupTopology(c, sourceCount, recvNeighbors);
+  int sourceCount        = findExternalOwningRanks(
+      c, (int)m->startRow, extLocalToGlobal, extCount, recvFromNeighbors, extOwningRank);
+  setupTopology(c, sourceCount, recvFromNeighbors);
   retrieveTopology(c);
 
-  free(recvNeighbors);
+  free(recvFromNeighbors);
 
   /***********************************************************************
-   *    Step 3:  Build and apply index mapping
+   *    Step 3:  Reorder externals and localize matrix
    ************************************************************************/
-  int *externalsReordered = (int *)allocate(ARRAY_ALIGNMENT, externalCount * sizeof(int));
+  int *extLocalToGlobalReordered =
+      (int *)allocate(ARRAY_ALIGNMENT, extCount * sizeof(int));
 
-  buildIndexMapping(
-      m, externals, externalCount, externalIndex, externalsReordered, externalRank);
+  {
+    int *extLocalIndex = (int *)allocate(ARRAY_ALIGNMENT, extCount * sizeof(int));
+    int numRows        = m->nr;
 
-  free(externalIndex);
-  bstFree(externals);
+    reorderExternals(numRows, extCount, extLocalIndex, extOwningRank);
+
+    // update zero based external mapping to new ordering
+    for (int i = 0; i < extCount; i++) {
+      extLocalToGlobalReordered[extLocalIndex[i] - numRows] = extLocalToGlobal[i];
+    }
+
+    localizeMatrix(m, extLookup, extLocalIndex);
+
+    free(extLocalIndex);
+    free(extLocalToGlobal);
+    bstFree(extLookup);
+  }
 
 #ifdef VERBOSE
   FPRINTF(c->logFile, "STEP 3 \n");
-  FPRINTF(c->logFile, "Rank %d of %d: %d externals\n", rank, size, externalCount);
+  FPRINTF(c->logFile, "Rank %d of %d: %d externals\n", rank, size, extCount);
 
-  for (int i = 0; i < externalCount; i++) {
+  for (int i = 0; i < extCount; i++) {
     FPRINTF(c->logFile,
         "Rank %d of %d: external[%d] owned by %d\n",
         rank,
         size,
         i,
-        externalRank[i]);
+        extOwningRank[i]);
   }
-#endif
+#endif // VERBOSE
 
-  m->nc = m->nc + externalCount;
-  free(externalRank);
+  m->nc = m->nc + extCount;
+  free(extOwningRank);
 
   /***********************************************************************
    *    Step 4:  Build global index list for external communication
    ************************************************************************/
-  buildElementsToSend(c, (int)m->startRow, externalsReordered);
+  buildElementsToSend(c, (int)m->startRow, extLocalToGlobalReordered);
 
-  free(externalsReordered);
+  free(extLocalToGlobalReordered);
 #endif
 }
 
@@ -882,7 +884,7 @@ void commInit(CommType *c, int argc, char **argv)
 #ifdef VERBOSE
   char filename[MAXSTRLEN];
   snprintf(filename, sizeof(filename), "out-%d.txt", c->rank);
-  c->logFile = fopen(filename, "w");
+  c->logFile = fopen(filename, "we");
   if (c->logFile == NULL) {
     printf("Warning: Could not open log file %s\n", filename);
   }
