@@ -534,6 +534,75 @@ static void retrieveTopology(CommType *c)
 
 #endif //MPI
 
+
+/**
+ * @brief Print application banner and configuration information.
+ * 
+ * Prints the application banner along with matrix format, precision, and
+ * integer type configuration. This is typically called once at startup.
+ */
+static void printConfigInfo(void)
+{
+  printf(BANNER "\n");
+  printf("Using %s matrix format, %s precision floats and integer type %s\n\n",
+      FMT,
+      PRECISION_STRING,
+      UINT_STRING);
+}
+
+#ifdef _OPENMP
+/**
+ * @brief Print OpenMP thread configuration.
+ * 
+ * Prints the number of OpenMP threads being used. Must be called from
+ * within an OpenMP parallel region to get accurate thread count.
+ */
+static void printOpenMPInfo(void)
+{
+#pragma omp single
+  printf("OpenMP enabled using %d threads\n", omp_get_num_threads());
+}
+#endif
+
+#if defined(VERBOSE_AFFINITY) && defined(_OPENMP)
+/**
+ * @brief Print detailed thread affinity information.
+ * 
+ * Prints detailed information about which CPU core each thread is running on,
+ * along with process and thread IDs. This function should be called from within
+ * an OpenMP parallel region with a critical section to avoid garbled output.
+ * 
+ * @param rank MPI rank of this process
+ * @param host Hostname where the process is running
+ * @param masterPid Process ID of the master thread
+ */
+static void printAffinityInfo(int rank, const char *host, pid_t masterPid)
+{
+  printf("Rank %d Thread %d running on Node %s core %d with pid %d and tid %d\n",
+      rank,
+      omp_get_thread_num(),
+      host,
+      sched_getcpu(),
+      masterPid,
+      gettid());
+  affinity_getmask();
+}
+#endif
+
+/**
+ * @brief Print startup banner with system and configuration information.
+ * 
+ * This function prints a comprehensive startup banner that includes:
+ * - Application banner and compile-time configuration
+ * - MPI rank information (if running with multiple processes)
+ * - OpenMP thread count (if compiled with OpenMP support)
+ * - Per-process hostname and PID information
+ * - Detailed affinity information (if VERBOSE_AFFINITY is enabled)
+ * 
+ * The output is synchronized across MPI ranks to ensure readable output.
+ * 
+ * @param c Communication structure containing rank and size information
+ */
 void commPrintBanner(CommType *c)
 {
   int rank = c->rank;
@@ -545,23 +614,28 @@ void commPrintBanner(CommType *c)
     snprintf(host, sizeof(host), "unknown");
   }
 
-  if (c->size > 1) {
-    if (commIsMaster(c)) {
-      printf(BANNER "\n");
-      printf("Using %s matrix format, %s precision floats and integer type %s\n\n",
-          FMT,
-          PRECISION_STRING,
-          UINT_STRING);
-      printf("MPI parallel using %d ranks\n", c->size);
+  // Print banner and configuration (master only in MPI mode, or always in single-process mode)
+  if (commIsMaster(c)) {
+    printConfigInfo();
+    
+    if (size > 1) {
+      printf("MPI parallel using %d ranks\n", size);
+    } else {
+      printf("Running with only one process!\n");
+    }
+    
 #ifdef _OPENMP
 #pragma omp parallel
-      {
-#pragma omp single
-        printf("OpenMP enabled using %d threads\n", omp_get_num_threads());
-      }
-#endif
+    {
+      printOpenMPInfo();
     }
+#endif
+  }
+
+  // In MPI mode, synchronize and print per-rank information
+  if (size > 1) {
     commBarrier();
+    
     for (int i = 0; i < size; i++) {
       if (i == rank) {
         printf("Process with rank %d running on Node %s with pid %d\n",
@@ -569,60 +643,32 @@ void commPrintBanner(CommType *c)
             host,
             masterPid);
       }
-
-#ifdef VERBOSE_AFFINITY
-#ifdef _OPENMP
+      
+#if defined(VERBOSE_AFFINITY) && defined(_OPENMP)
 #pragma omp parallel
       {
 #pragma omp critical
         {
-          printf("Rank %d Thread %d running on Node %s core %d with pid %d "
-                 "and tid "
-                 "%d\n",
-              rank,
-              omp_get_thread_num(),
-              host,
-              sched_getcpu(),
-              master_pid,
-              gettid());
-          affinity_getmask();
+          printAffinityInfo(rank, host, masterPid);
         }
-#endif
       }
-#endif //VERBOSE_AFFINITY
+#endif
+      
+      commBarrier();
     }
-    commBarrier();
-  } else {
-    printf(BANNER "\n");
-    printf("Using %s matrix format, %s precision floats and integer type %s\n\n",
-        FMT,
-        PRECISION_STRING,
-        UINT_STRING);
-    printf("Running with only one process!\n");
-#ifdef _OPENMP
+  }
+#if defined(VERBOSE_AFFINITY) && defined(_OPENMP)
+  // In single-process mode, print affinity info if requested
+  else {
 #pragma omp parallel
     {
-#pragma omp single
-      printf("OpenMP enabled using %d threads\n", omp_get_num_threads());
-
-#ifdef VERBOSE_AFFINITY
 #pragma omp critical
       {
-        printf("Rank %d Thread %d running on Node %s core %d with pid %d "
-               "and tid "
-               "%d\n",
-            rank,
-            omp_get_thread_num(),
-            host,
-            sched_getcpu(),
-            master_pid,
-            gettid());
-        affinity_getmask();
+        printAffinityInfo(rank, host, masterPid);
       }
-#endif
     }
-#endif //_OPENMP
   }
+#endif
 }
 
 void commDistributeMatrix(CommType *c, MMMatrix *m, MMMatrix *mLocal)
