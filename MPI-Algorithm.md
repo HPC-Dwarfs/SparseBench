@@ -9,32 +9,10 @@ without any MPI call. This is achieved by appending the column indices that are
 not available on the current rank to the end of the local vector and rewrite the
 column indices in the matrix accordingly.
 
-### Required data
-
-- `numNeighbors` The number of communication neighbors (same for send and
-  receive)
-- `neighbors` Array with communication neighbor ranks
-- `recvCount` Array with number of external values we receive from each neighbor
-- `sendCount` Array with number of values we need to send to each neighbor
-- `sendBuffer` Send buffer holding externals for all ranks
-- `elementsToSend` Index list with all values the current rank needs to send
-- `totalSendCount` Total number of values the current rank needs to send
-
-### Steps
-
-- Post receives of externals. External are directly copied into the appended external
-  portion of the target vector. No additional copying from a receive buffer is
-  required. Non blocking receive calls are used.
-- Copy all values the current rank needs to send to all neighbor ranks into the
-  one send buffer.
-- Send the requested values to every neighbor rank. Blocking Send calls are
-  used.
-- Wait for all non blocking receive calls to complete.
-
 ## Communication data structure
 
-- `totalSendCount`: Total number of elements to send for all receivers
-- `elementsToSend[totalSendCount]`: Local element ids to send for all receivers
+- `totalSendCount`: Total number of elements to send to all receivers
+- `elementsToSend[totalSendCount]`: Local element ids to send to all receivers
 - `indegree`: Number of ranks we receive messages from
 - `outdegree`: Number of ranks we send messages to
 - `sources[indegree]`: List of ranks we receive messages from
@@ -47,60 +25,67 @@ column indices in the matrix accordingly.
 ## Partitioning
 
 The matrix has to be distributed. Every rank gets a consecutive number of rows.
-Other options:
+Other options (not implemented):
 
 - Take into account total non zeroes per rank
 - Take into account total communication data volume
 
-### Step 1: Identify externals and create lookup maps
+## Localization
 
-Initially the column indices are in global ordering. The indices need to be
-converted to a local column ordering.
+### Step 1: Identify externals and create external lookup
+
+Scan the matrix and find unique external column references:
 
 - Determine if an index targets a local or external value
-- If local, subtract start row id from index to get local index
 - If external, check if it was already taken care for:
   - If yes, do nothing
   - otherwise
-    - add it to a list of external indices
-    - find out which rank owns the value
-    - set up communication for SpMVM
+    - add it to the external lookup (a binary search tree)
+    - add it to the external local to global id map
+    - increment the external counter
 
-- `externalCount`: Number of externals for current rank
-- `externals` SIZE `externalCount` temporary: Lookup if index was already seen before. Map from global index to local id in external lookups.
-- `externalIndex` SIZE `externalCount` temporary: List of global ids for all
-  external elements
+Variables:
 
-- Mark external in local column index by negating
-- Mark external in external lookup by setting to the local id
-- Add global index to external index list
+- `extCount`: Number of externals for current rank
+- `extLookup` binary search tree: Lookup if global index was
+  already seen before.
+- `extLocalToGlobal` SIZE `externalCount`: List of externals as
+  encountered in the matrix mapping from a local id to the global id
 
-### Step 2 Identify owning rank for externals
+### Step 2: Build dist Graph topology providing known incoming edges
 
-Determine which processors are required to resolve all externals. Gather the
-start row offsets for every ranks first.
+- Gather the start row offsets for all ranks
+- Determine the owning ranks for all externals
+- Set known graph with all incoming edges (all rank we need data from). Edge
+  weights are used to communicate message counts.
+- Create MPI Dist Graph Topology
+- Retrieve complete communication topology for current rank
 
-- `externalRank` SIZE `externalCount` temporary: Store for every external
-  the owning rank
+Variables:
 
-### Step 3 Build and apply index mapping
+- `extOwningRank` SIZE `extCount`: Owning rank for all externals
+- `sourceCount`: How many ranks send us messages
+- `recvFromNeighbors` SIZE `size`: Marker from which ranks the current rank
+  requires externals and how many
 
-Subroutine `buildIndexMapping`:
-Generate a local ordering for externals, starting at the end of the local
-elements. Give all indices belonging to same rank consecutive ids. Map all
-external column ids in matrix to new local index.
+### Step 3 Reorder externals and localize matrix
 
-- `externalLocalIndex` SIZE `externalCount` temporary: Local compacted RHS
-  index for every external. Consecutive ids for elements owned by same rank.
-- `externalReordered` SIZE `externalCount` temporary: Mapping for newly
-  ordered externals to global id
+- Reorder externals to ensure that external belonging to the same rank are
+  consecutive
+- Rewrite all matrix entries to reference local + external RHS vector
+
+Variables:
+
+- `extLocalToGlobalReordered` SIZE `extCount`: List of externals reordered
+  mapping from local external id to global id
+- `extLocalIndex` SIZE `extCount`: List of externals mapping from local external
+  id to local RHS vector id
 
 ### Step 4 Build global index list for external communication
 
-Subroutine `buildElementsToSend`:
-Send the global external indices in the order the current rank requires them.
-On the sending rank there is one index list for all neighboring ranks.
+Build a index list to local RHS ids for all elements the current rank needs to
+send to other ranks, in the order they require them in their external part of
+the RHS vector.
 
-- `elementsToSend` SIZE `totalSendCount` persistent: List with all global
-  indices the current rank needs to send to other ranks in the exact order they
-  need it in their external part of the vector
+- Send `extLocalToGlobalReordered` to all source ranks we receive messages from
+- On the sender side remap the global column ids to local RHS ids

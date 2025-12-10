@@ -235,16 +235,13 @@ static void calculateMMSendCounts(
 static int identifyExternals(
     CommType *c, GMatrix *A, Bstree *extLookup, int *extLocalToGlobal)
 {
-  CG_UINT *rowPtr   = A->rowPtr;
-  Entry *entries    = A->entries;
-  CG_UINT numRows   = A->nr;
-  CG_UINT startRow  = A->startRow;
-  CG_UINT stopRow   = A->stopRow;
-  int externalCount = 0;
+  CG_UINT *rowPtr  = A->rowPtr;
+  Entry *entries   = A->entries;
+  CG_UINT numRows  = A->nr;
+  CG_UINT startRow = A->startRow;
+  CG_UINT stopRow  = A->stopRow;
+  int extCount     = 0;
 
-#ifdef VERBOSE
-  FPRINTF(c->logFile, "STEP 1 \n");
-#endif
   for (int i = 0; i < numRows; i++) {
     for (CG_UINT j = rowPtr[i]; j < rowPtr[i + 1]; j++) {
       CG_UINT curIndex = entries[j].col;
@@ -253,22 +250,22 @@ static int identifyExternals(
       if (curIndex < startRow || curIndex > stopRow) {
         // find out if we have already set up this point
         if (!bstExists(extLookup, curIndex)) {
-          bstInsert(extLookup, curIndex, externalCount);
+          bstInsert(extLookup, curIndex, extCount);
 
-          if (externalCount < MAX_EXTERNAL) {
-            extLocalToGlobal[externalCount] = (int)curIndex;
+          if (extCount < MAX_EXTERNAL) {
+            extLocalToGlobal[extCount] = (int)curIndex;
           } else {
             commAbort(c, "Must increase MAX_EXTERNAL");
           }
-          externalCount++;
+          extCount++;
         }
       }
     }
   }
 #ifdef VERBOSE
-  printf("Rank %d: %d externals\n", c->rank, externalCount);
+  printf("Rank %d: %d externals\n", c->rank, extCount);
 #endif
-  return externalCount;
+  return extCount;
 }
 
 static int findExternalOwningRanks(CommType *c,
