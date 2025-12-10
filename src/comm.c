@@ -39,36 +39,29 @@ static int sizeOfRank(int rank, int size, int N)
 
 /**
  * @brief Reorder external elements to group those from the same owning rank consecutively.
- * 
+ *
  * This function reorganizes external elements so that all externals belonging to the same
  * source rank are assigned consecutive indices in the local extended RHS vector. This
  * ordering enables efficient MPI communication by ensuring that each rank's data forms
  * a contiguous block in memory, which aligns with MPI_Neighbor_alltoallv requirements.
- * 
+ *
  * @param numRows Number of local rows owned by this rank
  * @param extCount Total number of external elements
  * @param[out] extLocalIndex Maps from original external index to new local RHS index
  *                           (values will be in range [numRows, numRows+extCount-1])
  * @param[in,out] extOwningRank On input: owning rank for each external (original order)
  *                              On output: owning rank for each external (reordered)
- * 
+ *
  * Algorithm:
  * 1. For each unique owning rank encountered in extOwningRank (in order):
  *    a. Assign the next consecutive local index (starting from numRows)
  *    b. Search remaining externals for same owner and assign consecutive indices
  * 2. Update extOwningRank array to reflect the new ordering
- * 
- * Complexity: O(extCount² / numRanks_avg) where numRanks_avg is the average number
- * of source ranks per process.
+ *
  */
 static void reorderExternals(
     const int numRows, const int extCount, int *extLocalIndex, int *extOwningRank)
 {
-  /* Go through the external elements. For each newly encountered external,
-   * assign it the next index in the local sequence. Then look for other
-   * external elements who are updated by the same rank and assign them the next
-   * set of index numbers in the local sequence (i.e., elements updated by the same
-   * rank have consecutive indices). */
   int *newExtOwningRank = (int *)allocate(ARRAY_ALIGNMENT, extCount * sizeof(int));
 
   for (int i = 0; i < extCount; i++) {
@@ -92,7 +85,6 @@ static void reorderExternals(
     }
   }
 
-  // Update externalOwningRank for new ordering
   for (int i = 0; i < extCount; i++) {
     extOwningRank[i] = newExtOwningRank[i];
   }
@@ -102,22 +94,20 @@ static void reorderExternals(
 
 /**
  * @brief Remap all matrix column indices to local indexing (0-based local indices).
- * 
+ *
  * This function transforms the global column indices in the matrix to local indices
  * that reference the extended local RHS vector (local elements + externals). After
  * this transformation, all SpMV operations can use purely local indexing.
- * 
+ *
  * @param[in,out] A The distributed matrix to localize
  * @param extLookup Binary search tree mapping global column index → external array index
  * @param extLocalIndex Maps external array index → local RHS vector index
- * 
+ *
  * Algorithm:
  * For each matrix entry:
  * - If column index is in local range [startRow, stopRow]: convert to 0-based (col - startRow)
  * - If column index is external: lookup in extLookup to get external index, then use
  *   extLocalIndex to get the local RHS index (in range [numRows, numRows+extCount-1])
- * 
- * Complexity: O(nnz_local × log(extCount))
  */
 static void localizeMatrix(GMatrix *A, Bstree *extLookup, const int *extLocalIndex)
 {
@@ -127,7 +117,6 @@ static void localizeMatrix(GMatrix *A, Bstree *extLookup, const int *extLocalInd
   CG_UINT startRow = A->startRow;
   CG_UINT stopRow  = A->stopRow;
 
-  // map column ids in the matrix to the new local index
   for (int i = 0; i < numRows; i++) {
     for (int j = (int)rowPtr[i]; j < rowPtr[i + 1]; j++) {
       CG_UINT curIndex = entries[j].col;
@@ -147,11 +136,11 @@ static void localizeMatrix(GMatrix *A, Bstree *extLookup, const int *extLocalInd
  * This function exchanges external element lists between ranks to determine which local
  * elements each rank needs to send. The result is the elementsToSend array, which maps
  * to local row indices that will be packed into the send buffer during each exchange.
- * 
+ *
  * @param[in,out] c Communication structure to populate with send information
  * @param startRow First global row index owned by this rank
  * @param extLocalToGlobalReordered Global column indices needed by this rank (reordered)
- * 
+ *
  * Algorithm:
  * 1. Allocate send buffer and elementsToSend array
  * 2. Post non-blocking receives from all destination ranks (they will send the global
@@ -163,8 +152,6 @@ static void localizeMatrix(GMatrix *A, Bstree *extLookup, const int *extLocalInd
  * 
  * Result: c->elementsToSend[totalSendCount] contains local row indices to pack for sending,
  * organized by destination rank using c->sdispls and c->sendCounts
- * 
- * Complexity: O(totalSendCount)
  */
 static void buildElementsToSend(CommType *c, int startRow, int *extLocalToGlobalReordered)
 {
@@ -210,7 +197,6 @@ static void buildElementsToSend(CommType *c, int startRow, int *extLocalToGlobal
 
   MPI_Waitall(c->outdegree, request, MPI_STATUSES_IGNORE);
 
-  // map global indices to local indices
   for (int i = 0; i < c->totalSendCount; i++) {
     elementsToSend[i] -= startRow;
   }
@@ -302,25 +288,23 @@ static void calculateMMSendCounts(
 
 /**
  * @brief Scan the local matrix to identify all external column references.
- * 
+ *
  * This function examines every matrix entry to find column indices that reference rows
  * owned by other ranks (external elements). Each unique external is recorded once in
  * the extLocalToGlobal array and indexed in the extLookup binary search tree.
- * 
+ *
  * @param c Communication structure (for error handling)
  * @param A The local matrix partition to scan
  * @param[out] extLookup Binary search tree mapping global column index → external array index
  * @param[out] extLocalToGlobal Array mapping external index → global column index
  * @return Number of unique external elements found
- * 
+ *
  * Algorithm:
  * For each matrix entry (row, col):
  * - If col is outside local range [startRow, stopRow]:
  *   - Check extLookup to see if this global column was already seen
  *   - If new: insert into extLookup, add to extLocalToGlobal, increment counter
  *   - If already seen: skip (we only need each external once)
- * 
- * Complexity: O(nnz_local × log(extCount))
  */
 static int identifyExternals(
     CommType *c, GMatrix *A, Bstree *extLookup, int *extLocalToGlobal)
@@ -336,9 +320,7 @@ static int identifyExternals(
     for (CG_UINT j = rowPtr[i]; j < rowPtr[i + 1]; j++) {
       CG_UINT curIndex = entries[j].col;
 
-      // convert local column references to local numbering
       if (curIndex < startRow || curIndex > stopRow) {
-        // find out if we have already set up this point
         if (!bstExists(extLookup, curIndex)) {
           bstInsert(extLookup, curIndex, extCount);
 
@@ -360,11 +342,11 @@ static int identifyExternals(
 
 /**
  * @brief Determine which rank owns each external element.
- * 
+ *
  * This function uses an MPI_Allgather to obtain each rank's starting row offset, then
  * determines ownership for each external element by finding which rank's range contains
  * the global index. It also counts how many elements are needed from each source rank.
- * 
+ *
  * @param c Communication structure
  * @param startRow First global row owned by this rank
  * @param extLocalToGlobal Array mapping external index → global column index
@@ -373,7 +355,7 @@ static int identifyExternals(
  *                                (-1 if no communication, else count)
  * @param[out] extOwningRank Array mapping external index → owning MPI rank
  * @return Number of distinct source ranks (in-degree of communication graph)
- * 
+ *
  * Algorithm:
  * 1. Use MPI_Allgather to collect startRow from all ranks
  * 2. For each external element:
@@ -381,8 +363,6 @@ static int identifyExternals(
  *    - Record owner in extOwningRank
  *    - Update recvFromNeighbors count for that rank
  * 3. Count distinct source ranks
- * 
- * Complexity: O(extCount × log(numRanks))
  */
 static int findExternalOwningRanks(CommType *c,
     const int startRow,
@@ -402,7 +382,6 @@ static int findExternalOwningRanks(CommType *c,
 
   MPI_Allgather(&startRow, 1, MPI_INT, globalIndexOffsets, 1, MPI_INT, MPI_COMM_WORLD);
 
-  // Go through list of externals and find the processor that owns it
   for (int i = 0; i < extCount; i++) {
     int globalIndex = extLocalToGlobal[i];
 
@@ -425,24 +404,22 @@ static int findExternalOwningRanks(CommType *c,
 
 /**
  * @brief Create MPI distributed graph topology with known incoming edges.
- * 
+ *
  * This function sets up the MPI communication topology by specifying which ranks this
  * rank needs to receive from (sources). The MPI topology will automatically determine
  * the reverse direction (which ranks need data from us). Edge weights communicate the
  * message sizes (number of elements to receive from each source).
- * 
+ *
  * @param[in,out] c Communication structure; c->communicator will be set
  * @param sourceCount Number of source ranks (in-degree)
  * @param recvFromNeighbors Array tracking receive counts from each rank
- * 
+ *
  * Algorithm:
  * 1. Build arrays of source ranks and weights from recvFromNeighbors
  * 2. Create incoming edge arrays (degrees=1, destinations=this rank)
  * 3. Call MPI_Dist_graph_create to establish the topology
- * 
+ *
  * Result: c->communicator is initialized with the distributed graph topology
- * 
- * Complexity: O(sourceCount)
  */
 static void setupTopology(
     CommType *c, const int sourceCount, const int *recvFromNeighbors)
@@ -454,7 +431,6 @@ static void setupTopology(
   int cursor = 0;
   int size   = c->size;
 
-  // setup source nodes and element counts
   for (int i = 0; i < size; i++) {
     if (recvFromNeighbors[i] > 0) {
       sources[cursor]   = i;
@@ -462,7 +438,6 @@ static void setupTopology(
     }
   }
 
-  // setup incoming edges
   for (int i = 0; i < sourceCount; i++) {
     degrees[i]      = 1;
     destinations[i] = c->rank;
@@ -481,13 +456,13 @@ static void setupTopology(
 
 /**
  * @brief Retrieve the complete communication topology from MPI.
- * 
+ *
  * After the distributed graph topology is created, this function queries it to get
  * both the incoming and outgoing communication pattern. This includes source/destination
  * rank IDs and message counts in each direction.
- * 
+ *
  * @param[in,out] c Communication structure to populate with topology information
- * 
+ *
  * Algorithm:
  * 1. Call MPI_Dist_graph_neighbors_count to get in-degree and out-degree
  * 2. Allocate arrays for sources, destinations, and counts
@@ -500,8 +475,6 @@ static void setupTopology(
  * - destinations[outdegree]: Ranks we send to
  * - sendCounts[outdegree]: Elements to send to each destination
  * - rdispls, sdispls: Displacement arrays (allocated but not yet set)
- * 
- * Complexity: O(indegree + outdegree)
  */
 static void retrieveTopology(CommType *c)
 {
@@ -536,7 +509,7 @@ static void retrieveTopology(CommType *c)
 
 /**
  * @brief Print application banner and configuration information.
- * 
+ *
  * Prints the application banner along with matrix format, precision, and
  * integer type configuration. This is typically called once at startup.
  */
@@ -552,7 +525,7 @@ static void printConfigInfo(void)
 #if defined(VERBOSE_AFFINITY) && defined(_OPENMP)
 /**
  * @brief Print detailed thread affinity information.
- * 
+ *
  * Prints detailed information about which CPU core each thread is running on,
  * along with process and thread IDs. This function should be called from within
  * an OpenMP parallel region with a critical section to avoid garbled output.
@@ -576,16 +549,16 @@ static void printAffinityInfo(int rank, const char *host, pid_t masterPid)
 
 /**
  * @brief Print startup banner with system and configuration information.
- * 
+ *
  * This function prints a comprehensive startup banner that includes:
  * - Application banner and compile-time configuration
  * - MPI rank information (if running with multiple processes)
  * - OpenMP thread count (if compiled with OpenMP support)
  * - Per-process hostname and PID information
  * - Detailed affinity information (if VERBOSE_AFFINITY is enabled)
- * 
+ *
  * The output is synchronized across MPI ranks to ensure readable output.
- * 
+ *
  * @param c Communication structure containing rank and size information
  */
 void commPrintBanner(CommType *c)
