@@ -549,20 +549,6 @@ static void printConfigInfo(void)
       UINT_STRING);
 }
 
-#ifdef _OPENMP
-/**
- * @brief Print OpenMP thread configuration.
- * 
- * Prints the number of OpenMP threads being used. Must be called from
- * within an OpenMP parallel region to get accurate thread count.
- */
-static void printOpenMPInfo(void)
-{
-#pragma omp single
-  printf("OpenMP enabled using %d threads\n", omp_get_num_threads());
-}
-#endif
-
 #if defined(VERBOSE_AFFINITY) && defined(_OPENMP)
 /**
  * @brief Print detailed thread affinity information.
@@ -624,10 +610,7 @@ void commPrintBanner(CommType *c)
     }
 
 #ifdef _OPENMP
-#pragma omp parallel
-    {
-      printOpenMPInfo();
-    }
+    printf("OpenMP enabled using %d threads\n", omp_get_max_threads());
 #endif
   }
 
