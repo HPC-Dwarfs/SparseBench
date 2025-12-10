@@ -11,6 +11,17 @@ MAKE_DIR   = ./mk
 Q         ?= @
 
 #DO NOT EDIT BELOW
+ifeq (,$(wildcard config.mk))
+$(info )
+$(info ====================================================================)
+$(info config.mk does not exist!)
+$(info Creating config.mk from ./mk/config-default.mk)
+$(info Please adapt config.mk to your needs and run make again.)
+$(info ====================================================================)
+$(info )
+$(shell cp ./mk/config-default.mk config.mk)
+$(error Stopping after creating config.mk - please review and run make again)
+endif
 include config.mk
 include $(MAKE_DIR)/include_$(TOOLCHAIN).mk
 INCLUDES  += -I$(SRC_DIR)/includes -I$(BUILD_DIR)
