@@ -583,7 +583,7 @@ void commPrintBanner(CommType *c)
               omp_get_thread_num(),
               host,
               sched_getcpu(),
-              master_pid,
+              masterPid,
               gettid());
           affinity_getmask();
         }
@@ -615,7 +615,7 @@ void commPrintBanner(CommType *c)
             omp_get_thread_num(),
             host,
             sched_getcpu(),
-            master_pid,
+            masterPid,
             gettid());
         affinity_getmask();
       }
@@ -703,7 +703,6 @@ void commDistributeMatrix(CommType *c, MMMatrix *m, MMMatrix *mLocal)
   mLocal->entries  = m->entries;
 #endif /* ifdef _MPI */
 }
-
 
 /**
  * @brief Transform distributed matrix to enable efficient single-exchange communication.
@@ -810,12 +809,12 @@ void commLocalization(CommType *c, GMatrix *m)
   int *recvFromNeighbors = (int *)allocate(ARRAY_ALIGNMENT, size * sizeof(int));
 
   // Find which rank owns each external and count how many we need from each source
-  int sourceCount        = findExternalOwningRanks(
+  int sourceCount = findExternalOwningRanks(
       c, (int)m->startRow, extLocalToGlobal, extCount, recvFromNeighbors, extOwningRank);
-  
+
   // Create MPI distributed graph with incoming edges (sources + receive counts)
   setupTopology(c, sourceCount, recvFromNeighbors);
-  
+
   // Query the topology to get both incoming and outgoing communication pattern
   retrieveTopology(c);
 
