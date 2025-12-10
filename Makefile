@@ -63,6 +63,7 @@ distclean:
 	$(info ===>  DIST CLEAN)
 	@rm -rf build
 	@rm -f $(TARGET)
+	@rm -f compile_commands.json
 	@rm -f tags .clangd out*
 
 info:
