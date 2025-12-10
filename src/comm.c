@@ -534,7 +534,6 @@ static void retrieveTopology(CommType *c)
 
 #endif //MPI
 
-
 /**
  * @brief Print application banner and configuration information.
  * 
@@ -617,13 +616,13 @@ void commPrintBanner(CommType *c)
   // Print banner and configuration (master only in MPI mode, or always in single-process mode)
   if (commIsMaster(c)) {
     printConfigInfo();
-    
+
     if (size > 1) {
       printf("MPI parallel using %d ranks\n", size);
     } else {
       printf("Running with only one process!\n");
     }
-    
+
 #ifdef _OPENMP
 #pragma omp parallel
     {
@@ -635,7 +634,7 @@ void commPrintBanner(CommType *c)
   // In MPI mode, synchronize and print per-rank information
   if (size > 1) {
     commBarrier();
-    
+
     for (int i = 0; i < size; i++) {
       if (i == rank) {
         printf("Process with rank %d running on Node %s with pid %d\n",
@@ -643,7 +642,7 @@ void commPrintBanner(CommType *c)
             host,
             masterPid);
       }
-      
+
 #if defined(VERBOSE_AFFINITY) && defined(_OPENMP)
 #pragma omp parallel
       {
@@ -653,7 +652,7 @@ void commPrintBanner(CommType *c)
         }
       }
 #endif
-      
+
       commBarrier();
     }
   }
@@ -749,7 +748,6 @@ void commDistributeMatrix(CommType *c, MMMatrix *m, MMMatrix *mLocal)
   mLocal->entries  = m->entries;
 #endif /* ifdef _MPI */
 }
-
 
 /**
  * @brief Transform distributed matrix to enable efficient single-exchange communication.
@@ -856,12 +854,12 @@ void commLocalization(CommType *c, GMatrix *m)
   int *recvFromNeighbors = (int *)allocate(ARRAY_ALIGNMENT, size * sizeof(int));
 
   // Find which rank owns each external and count how many we need from each source
-  int sourceCount        = findExternalOwningRanks(
+  int sourceCount = findExternalOwningRanks(
       c, (int)m->startRow, extLocalToGlobal, extCount, recvFromNeighbors, extOwningRank);
-  
+
   // Create MPI distributed graph with incoming edges (sources + receive counts)
   setupTopology(c, sourceCount, recvFromNeighbors);
-  
+
   // Query the topology to get both incoming and outgoing communication pattern
   retrieveTopology(c);
 
