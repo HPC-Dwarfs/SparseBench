@@ -30,7 +30,8 @@ The following benchmark types are available:
 - **CG**: Conjugate Gradient iterative solver for symmetric positive definite
   systems.
 - **SPMV**: Sparse Matrix-Vector Multiplication (SpMV) kernel benchmark.
-- **GMRES**: Generalized Minimal Residual method for general sparse systems.
+- **GMRES**: Generalized Minimal Residual method for general sparse systems
+  (planned).
 - **CHEBFD**: Chebyshev Filter Diagonalization (planned).
 
 ### MPI Communication Algorithm

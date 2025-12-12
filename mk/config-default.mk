@@ -1,4 +1,4 @@
-# Supported: GCC, CLANG, ICC
+# Supported: GCC, CLANG, ICX
 TOOLCHAIN ?= CLANG
 # Supported CRS, SCS, CCRS
 MTX_FMT ?= CRS
@@ -20,7 +20,6 @@ OPTIONS +=  -DOMP_SCHEDULE=static
 # DO NOT EDIT BELOW !!!
 ################################################################
 DEFINES =
-
 DEFINES += -D$(MTX_FMT)
 
 ifeq ($(strip $(FLOAT_TYPE)),SP)
