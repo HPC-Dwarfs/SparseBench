@@ -1,5 +1,5 @@
 # Copyright (C) NHR@FAU, University Erlangen-Nuremberg.
-# All rights reserved.
+# All rights reserved. This file is part of SparseBench.
 # Use of this source code is governed by a MIT-style
 # license that can be found in the LICENSE file.
 
@@ -62,7 +62,7 @@ clean:
 distclean:
 	$(info ===>  DIST CLEAN)
 	@rm -rf build
-	@rm -f $(TARGET)
+	@rm -f sparseBench-*
 	@rm -f compile_commands.json
 	@rm -f tags .clangd out*
 
