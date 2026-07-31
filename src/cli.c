@@ -35,9 +35,6 @@ static void writeBinMatrix(CommType *c, char *filename)
 
 void parseArguments(CommType *comm, Parameter *param, int argc, char **argv)
 {
-  char *cvalue = NULL;
-  int index;
-  bool stop = false;
   int c;
   opterr = 0;
 
@@ -47,12 +44,18 @@ void parseArguments(CommType *comm, Parameter *param, int argc, char **argv)
       if (commIsMaster(comm)) {
         printf(HELPTEXT);
       }
-      commAbort(comm, "Finish write matrix");
+      /* Every rank reaches this point; shut down cleanly with success. */
+      commFinalize(comm);
+      exit(EXIT_SUCCESS);
       break;
     case 'c':
 #ifdef _MPI
       writeBinMatrix(comm, optarg);
-      commAbort(comm, "Finish write matrix");
+      if (commIsMaster(comm)) {
+        printf("Finished writing binary matrix file\n");
+      }
+      commFinalize(comm);
+      exit(EXIT_SUCCESS);
 #else
       printf("Binary matrix files are only supported with MPI!\n");
       exit(EXIT_SUCCESS);
@@ -122,11 +125,7 @@ void parseArguments(CommType *comm, Parameter *param, int argc, char **argv)
     }
   }
 
-  for (index = optind; index < argc; index++) {
+  for (int index = optind; index < argc; index++) {
     printf("Non-option argument %s\n", argv[index]);
-  }
-
-  if (stop) {
-    commAbort(comm, "Wrong command line arguments");
   }
 }

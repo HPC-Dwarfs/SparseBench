@@ -16,9 +16,9 @@
 
 void waxpby(const CG_UINT n,
     const V_ELE alpha,
-    const V_ELE *restrict x,
+    const V_ELE *x,
     const V_ELE beta,
-    const V_ELE *restrict y,
+    const V_ELE *y,
     V_ELE *const w)
 {
   if (alpha == 1.0) {
@@ -39,10 +39,7 @@ void waxpby(const CG_UINT n,
   }
 }
 
-void ddot(const CG_UINT n,
-    const V_ELE *restrict x,
-    const V_ELE *restrict y,
-    V_ELE *restrict result)
+void ddot(const CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *result)
 {
   V_ELE sum = 0.0;
 

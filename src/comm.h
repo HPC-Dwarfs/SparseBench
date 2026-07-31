@@ -62,6 +62,11 @@ extern void commGMatrixDump(CommType *c, GMatrix *m);
 extern void commMatrixDump(CommType *c, Matrix *m);
 extern void commVectorDump(CommType *c, V_ELE *v, CG_UINT size, char *name);
 extern void commExchange(CommType *c, CG_UINT numRows, V_ELE *x);
+/* Remap the halo send indices through a row permutation. Needed when the
+ * solver keeps its vectors in a permuted order (e.g. SCS): the indices built
+ * during localization refer to the original row numbering, but the vector
+ * entries have been reordered since. No-op without MPI. */
+extern void commRemapSendIndices(CommType *c, const CG_UINT *oldToNewPerm);
 #if defined(_MPI)
 extern void commExchangeBegin(CommType *c, CG_UINT numRows, V_ELE *x, MPI_Request *req);
 extern int commExchangeTest(MPI_Request *req);

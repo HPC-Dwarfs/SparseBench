@@ -27,7 +27,7 @@ void initParameter(Parameter *param)
 
 void readParameter(Parameter *param, const char *filename)
 {
-  FILE *fp = fopen(filename, "re");
+  FILE *fp = fopen(filename, "r");
   char line[MAXLINE];
   int i;
 
@@ -36,9 +36,7 @@ void readParameter(Parameter *param, const char *filename)
     exit(EXIT_FAILURE);
   }
 
-  while (!feof(fp)) {
-    line[0] = '\0';
-    fgets(line, MAXLINE, fp);
+  while (fgets(line, MAXLINE, fp) != NULL) {
     for (i = 0; line[i] != '\0' && line[i] != '#'; i++)
       ;
     line[i]   = '\0';

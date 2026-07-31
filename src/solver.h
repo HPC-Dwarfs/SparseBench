@@ -30,15 +30,16 @@ extern int solveCG(CommType *comm, Parameter *param, Matrix *m);
 extern void spMVM(Matrix *m, const V_ELE *restrict x, V_ELE *restrict y);
 extern void spMMVM(Matrix *m, const DMatrix *x, DMatrix *y);
 
+/* waxpby and ddot deliberately support aliasing: the CG solver calls
+ * waxpby(n, 1.0, v, s, w, v) style in-place updates and ddot(n, v, v, &r).
+ * Declaring x/y/w restrict would make those calls undefined behavior (GCC
+ * reports -Wrestrict), so no restrict qualifiers are used here. */
 extern void waxpby(const CG_UINT n,
     const V_ELE alpha,
-    const V_ELE *restrict x,
+    const V_ELE *x,
     const V_ELE beta,
-    const V_ELE *restrict y,
-    V_ELE *restrict w);
+    const V_ELE *y,
+    V_ELE *w);
 
-extern void ddot(const CG_UINT n,
-    const V_ELE *restrict e,
-    const V_ELE *restrict y,
-    V_ELE *restrict result);
+extern void ddot(const CG_UINT n, const V_ELE *e, const V_ELE *y, V_ELE *result);
 #endif // __SOLVER_H_

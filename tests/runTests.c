@@ -15,18 +15,26 @@
 
 int main(int argc, char **argv)
 {
+  int failures = 0;
+
 #if defined(RUNTIME_BACKEND_IS_CUDA) || defined(RUNTIME_BACKEND_IS_HIP)
   gpu_init(0);
 #endif
 #ifdef SCS
-  matrixTests(argc, argv);
+  failures += (matrixTests(argc, argv) != 0);
 #endif
   // Self-contained and fast, so run it before the data-driven tests
-  solverTestsSPMVSplit(argc, argv);
-  solverTestsSPMV(argc, argv);
-  solverTestsSPMMV(argc, argv);
+  failures += (solverTestsSPMVSplit(argc, argv) != 0);
+  failures += (solverTestsSPMV(argc, argv) != 0);
+  failures += (solverTestsSPMMV(argc, argv) != 0);
 #if defined(RUNTIME_BACKEND_IS_CUDA) || defined(RUNTIME_BACKEND_IS_HIP)
   gpu_finalize();
 #endif
+
+  if (failures != 0) {
+    printf("\n%d test suite(s) reported failures.\n", failures);
+    return 1;
+  }
+  printf("\nAll test suites passed.\n");
   return 0;
 }

@@ -347,6 +347,9 @@ static void buildElementsToSend(CommType *c, int startRow, int *extLocalToGlobal
 }
 #endif //MPI
 
+/* scanMM is only needed when distributing an MM matrix over MPI ranks.
+ * Guard it so non-MPI builds do not warn about an unused static function. */
+#ifdef _MPI
 static void scanMM(
     MMMatrix *m, int startRow, int stopRow, int *entryCount, int *entryOffset)
 {
@@ -368,15 +371,20 @@ static void scanMM(
     }
   }
 }
+#endif /* _MPI */
 
+/* Debug helper for tracing the distributed Matrix Market input to the rank
+ * log files (see the VERBOSE build option). Currently has no call sites. */
+#if defined(_MPI) && defined(VERBOSE)
 static void dumpMMMatrix(CommType *c, MMMatrix *mm)
 {
   MMEntry *entries = mm->entries;
 
-  for (int i = 0; i < mm->count; i++) {
+  for (size_t i = 0; i < mm->count; i++) {
     FPRINTF(c->logFile, "%d %d: %f\n", entries[i].row, entries[i].col, entries[i].val);
   }
 }
+#endif /* _MPI && VERBOSE */
 
 #ifdef _MPI
 static void createMMEntryDatatype(MPI_Datatype *entryType)
@@ -1089,6 +1097,25 @@ void commLocalization(CommType *c, GMatrix *m)
 #endif
 }
 
+void commRemapSendIndices(CommType *c, const CG_UINT *oldToNewPerm)
+{
+#if defined(_MPI)
+  if (oldToNewPerm == NULL) {
+    return;
+  }
+
+  /* elementsToSend[i] holds an original local row index. The vectors that get
+   * exchanged are permuted, so the value of that row now lives at
+   * oldToNewPerm[elementsToSend[i]]. */
+  for (int i = 0; i < c->totalSendCount; i++) {
+    c->elementsToSend[i] = (int)oldToNewPerm[c->elementsToSend[i]];
+  }
+#else
+  (void)c;
+  (void)oldToNewPerm;
+#endif
+}
+
 void commExchange(CommType *c, CG_UINT numRows, V_ELE *x)
 {
 #ifdef _MPI
@@ -1463,7 +1490,10 @@ void commInit(CommType *c, int argc, char **argv)
 
 void commAbort(CommType *c, char *msg)
 {
-  printf("Abort: %s\n", msg);
+  /* Print on every rank and flush: MPI_Abort may kill the process before
+   * buffered stdout is written out, swallowing the actual error message. */
+  fprintf(stderr, "Rank %d aborting: %s\n", c->rank, msg);
+  fflush(NULL);
 #if defined(_MPI)
   MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
 #endif

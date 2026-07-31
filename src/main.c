@@ -29,7 +29,7 @@ static void initMatrix(CommType *c, Parameter *p, GMatrix *m)
     matrixGenerate(m, p, c->rank, c->size, true);
   } else {
     char *dot = strrchr(p->filename, '.');
-    if (strcmp(dot, ".mtx") == 0) {
+    if (dot != NULL && strcmp(dot, ".mtx") == 0) {
       MMMatrix mm;
       MMMatrix mmLocal;
 
@@ -40,7 +40,7 @@ static void initMatrix(CommType *c, Parameter *p, GMatrix *m)
 
       commDistributeMatrix(c, &mm, &mmLocal);
       matrixConvertfromMM(&mmLocal, m);
-    } else if (strcmp(dot, ".bmx") == 0) {
+    } else if (dot != NULL && strcmp(dot, ".bmx") == 0) {
 #ifdef _MPI
       if (commIsMaster(c)) {
         printf("Read BMX matrix\n");
@@ -51,7 +51,8 @@ static void initMatrix(CommType *c, Parameter *p, GMatrix *m)
       exit(EXIT_SUCCESS);
 #endif
     } else {
-      printf("Unknown matrix file format!\n");
+      /* Running on an uninitialized matrix is useless; stop all ranks. */
+      commAbort(c, "Unknown matrix file format (expected .mtx or .bmx)");
     }
   }
 }
@@ -87,6 +88,14 @@ int main(int argc, char **argv)
   sm.sigma = param.Sigma;
 #endif
   convertMatrix(&sm, &m);
+
+#ifdef SCS
+  /* The solver holds its vectors in SCS (permuted) order, but the halo pack
+   * indices built by commLocalization refer to the original row numbering.
+   * Remap them once so commExchange sends the values of the correct rows. */
+  commRemapSendIndices(&comm, sm.oldToNewPerm);
+#endif
+
   commBarrier();
   timeStop = getTimeStamp();
   if (commIsMaster(&comm)) {
@@ -142,60 +151,90 @@ int main(int argc, char **argv)
   int numSeq = 0;
   int *seq   = NULL;
 
-  int k      = 0;
+  int k = 0;
+  /* Storage for the profiler region sequences at function scope: seq is
+   * handed to profilerPrint() after the switch, so pointing it at arrays
+   * declared inside the switch would dangle (stack-use-after-scope). */
+  int seqCgPlain[3]   = { DDOT, WAXPBY, SPMVM };
+  int seqCgOverlap[5] = { DDOT, WAXPBY, SPMVM_LOCAL, SPMVM_EXT, COMM_WAIT };
+  int seqSpmvmMpi[2]  = { SPMVM, COMM };
+  int seqSpmvm[1]     = { SPMVM };
+  int seqSpmmv[1]     = { SPMMVM };
   switch (BenchType) {
   case CG:
 #ifdef USE_OVERLAP_SPMVM
-    numSeq       = 5;
-    int seqCg[5] = { DDOT, WAXPBY, SPMVM_LOCAL, SPMVM_EXT, COMM_WAIT };
+    numSeq = 5;
+    seq    = seqCgOverlap;
 #else
-    numSeq       = 3;
-    int seqCg[3] = { DDOT, WAXPBY, SPMVM };
+    numSeq = 3;
+    seq    = seqCgPlain;
 #endif
-    seq = seqCg;
     if (commIsMaster(&comm)) {
       printf("Test type: CG\n");
     }
     k = solveCG(&comm, &param, &sm);
     break;
   case SPMV:
-    numSeq          = 1;
-    int secSpmvm[1] = { SPMVM };
-    seq             = secSpmvm;
+#ifdef _MPI
+    /* The exchange is part of every well-formed distributed SpMV benchmark */
+    numSeq = 2;
+    seq    = seqSpmvmMpi;
+#else
+    numSeq = 1;
+    seq    = seqSpmvm;
+#endif
     if (commIsMaster(&comm)) {
       printf("Test type: SPMVM\n");
     }
     const int itermax = param.itermax;
+    /* The SCS kernel also touches the padded row slots, so y must hold
+     * nrPadded (not just nr) entries. x is indexed through colInd only, where
+     * every value is < nc, so m.nc entries suffice there. */
+    CG_UINT yLen = m.nr;
+#ifdef SCS
+    yLen = sm.nrPadded;
+#endif
     V_ELE *x          = (V_ELE *)allocate(ARRAY_ALIGNMENT, m.nc * sizeof(V_ELE));
-    V_ELE *y          = (V_ELE *)allocate(ARRAY_ALIGNMENT, m.nr * sizeof(V_ELE));
+    V_ELE *y          = (V_ELE *)allocate(ARRAY_ALIGNMENT, yLen * sizeof(V_ELE));
 
-    for (int i = 0; i < m.nr; i++) {
+    /* Initialize the whole extended vector: after localization x holds
+     * m.nc entries (locals + externals). Only touching m.nr of them leaves
+     * the external slots uninitialized. */
+    for (CG_UINT i = 0; i < m.nc; i++) {
       x[i] = 1.0;
+    }
+    for (CG_UINT i = 0; i < yLen; i++) {
       y[i] = 1.0;
     }
 
     for (k = 1; k < itermax; k++) {
+      /* Refresh the halo like a real application would; no-op without MPI. */
+      PROFILE(COMM, commExchange(&comm, sm.nr, x));
       PROFILE(SPMVM, spMVM(&sm, x, y));
     }
     break;
 
   case SPMMV: {
-    numSeq          = 1;
-    int secSpmmv[1] = { SPMMVM };
-    seq             = secSpmmv;
+    numSeq = 1;
+    seq    = seqSpmmv;
     if (commIsMaster(&comm)) {
       printf("Test type: SPMMVM\n");
     }
     int itermax = param.itermax;
+    /* SCS writes the padded rows of y as well (nrPadded >= nr). */
+    CG_UINT yRows = sm.nr;
+#ifdef SCS
+    yRows         = sm.nrPadded;
+#endif
     DMatrix x   = { .nr = sm.nc, .nc = param.blockwidth, .entries = NULL };
-    DMatrix y   = { .nr = sm.nr, .nc = param.blockwidth, .entries = NULL };
+    DMatrix y   = { .nr = yRows, .nc = param.blockwidth, .entries = NULL };
     x.entries   = (V_ELE *)allocate(ARRAY_ALIGNMENT, x.nr * x.nc * sizeof(V_ELE));
     y.entries   = (V_ELE *)allocate(ARRAY_ALIGNMENT, y.nr * y.nc * sizeof(V_ELE));
 
-    for (int i = 0; i < x.nr * x.nc; i++) {
+    for (CG_UINT i = 0; i < x.nr * x.nc; i++) {
       x.entries[i] = 1.0;
     }
-    for (int i = 0; i < y.nr * y.nc; i++) {
+    for (CG_UINT i = 0; i < y.nr * y.nc; i++) {
       y.entries[i] = 0.0;
     }
 

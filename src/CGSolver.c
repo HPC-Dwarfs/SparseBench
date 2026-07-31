@@ -22,14 +22,15 @@
 
 static void initVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
 {
-#ifdef CRS
+/* The CRS branch only needs rowPtr, which CCRS provides as well. */
+#if defined(CRS) || defined(CCRS)
   CG_UINT numRows = m->nr;
   CG_UINT *rowPtr = m->rowPtr;
 
-  for (int rowID = 0; rowID < numRows; rowID++) {
+  for (CG_UINT rowID = 0; rowID < numRows; rowID++) {
 
-    int nnzrow = rowPtr[rowID + 1] - rowPtr[rowID];
-    x[rowID]   = 0.0;
+    CG_UINT nnzrow = rowPtr[rowID + 1] - rowPtr[rowID];
+    x[rowID]       = 0.0;
 
     if (xexact != NULL) {
       b[rowID]      = 27.0 - ((CG_FLOAT)(nnzrow - 1));
@@ -43,11 +44,10 @@ static void initVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
   CG_UINT c             = m->C;
   CG_UINT *chunkPtr     = m->chunkPtr;
   CG_UINT *chunkLens    = m->chunkLens;
-  CG_UINT *colInd       = m->colInd;
   V_ELE *val            = m->val;
   CG_UINT *oldToNewPerm = m->oldToNewPerm;
 
-  for (int rowID = 0; rowID < numRows; rowID++) {
+  for (CG_UINT rowID = 0; rowID < numRows; rowID++) {
     x[rowID] = 0.0;
 
     // Map original row to new row position in SCS format
@@ -210,8 +210,6 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
 #ifdef SCS
   CG_UINT *oldToNewPerm = A->oldToNewPerm;
   CG_UINT *newToOldPerm = A->newToOldPerm;
-  CG_UINT *colIndScs    = A->colInd;
-  CG_UINT nElemsScs     = A->nElems;
 
   // Permute b, x (and xexact) from original to SCS ordering
   V_ELE *permTmp = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
