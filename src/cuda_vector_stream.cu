@@ -39,17 +39,17 @@
 /* cudaMemPrefetchAsync returns cudaErrorInvalidValue for memory that is
  * not managed (pinned or plain cudaMalloc); the buffer then already lives
  * where its allocator put it, so only genuine errors abort. */
-static void prefetchRange(const void *p, size_t bytes, int dev)
+static void prefetchRange(const void *p, size_t bytes, int dev, gpuStream_t stream)
 {
   if (p == NULL || bytes == 0) {
     return;
   }
-  gpuError_t rc = gpuMemPrefetch(p, bytes, dev);
+  gpuError_t rc = gpuMemPrefetch(p, bytes, dev, stream);
   if (rc == GCXX_RUNTIME_BACKEND(ErrorInvalidValue)) {
     (void)GCXX_RUNTIME_BACKEND(GetLastError)();
     return;
   }
-  GPU_SAFE_CALL(rc);
+  GPU_CHECK_CALL(rc);
 }
 
 extern "C" void gpu_matrix_prefetch(const Matrix *m)
@@ -59,18 +59,19 @@ extern "C" void gpu_matrix_prefetch(const Matrix *m)
   }
   NVTX_RANGE_PUSH_C("gpu.matrixPrefetch", NVTX_C_STREAM);
   int dev = 0;
-  GPU_SAFE_CALL(gpuGetDevice(&dev));
+  GPU_CHECK_CALL(gpuGetDevice(&dev));
+/* Synchronous prefetch: issue on the default stream, then sync below. */
 #ifdef SCS
-  prefetchRange(m->val, (size_t)m->nElems * sizeof(V_ELE), dev);
-  prefetchRange(m->colInd, (size_t)m->nElems * sizeof(CG_UINT), dev);
-  prefetchRange(m->chunkPtr, ((size_t)m->nChunks + 1) * sizeof(CG_UINT), dev);
-  prefetchRange(m->chunkLens, (size_t)m->nChunks * sizeof(CG_UINT), dev);
+  prefetchRange(m->val, (size_t)m->nElems * sizeof(V_ELE), dev, 0);
+  prefetchRange(m->colInd, (size_t)m->nElems * sizeof(CG_UINT), dev, 0);
+  prefetchRange(m->chunkPtr, ((size_t)m->nChunks + 1) * sizeof(CG_UINT), dev, 0);
+  prefetchRange(m->chunkLens, (size_t)m->nChunks * sizeof(CG_UINT), dev, 0);
 #elif defined(CRS)
-  prefetchRange(m->val, (size_t)m->nnz * sizeof(V_ELE), dev);
-  prefetchRange(m->colInd, (size_t)m->nnz * sizeof(CG_UINT), dev);
-  prefetchRange(m->rowPtr, ((size_t)m->nr + 1) * sizeof(CG_UINT), dev);
+  prefetchRange(m->val, (size_t)m->nnz * sizeof(V_ELE), dev, 0);
+  prefetchRange(m->colInd, (size_t)m->nnz * sizeof(CG_UINT), dev, 0);
+  prefetchRange(m->rowPtr, ((size_t)m->nr + 1) * sizeof(CG_UINT), dev, 0);
 #endif
-  GPU_SAFE_CALL(gpuDeviceSynchronize());
+  GPU_CHECK_CALL(gpuDeviceSynchronize());
   NVTX_RANGE_POP();
 }
 
@@ -224,38 +225,38 @@ extern "C" GpuVectorStream *gpu_vstream_init(
   s->chunkRows = rows;
 
   NVTX_RANGE_PUSH_C("gpu.vstreamInit", NVTX_C_STREAM);
-  GPU_SAFE_CALL(gpuStreamCreate(&s->computeStream));
-  GPU_SAFE_CALL(gpuStreamCreate(&s->copyStream));
+  GPU_CHECK_CALL(gpuStreamCreate(&s->computeStream));
+  GPU_CHECK_CALL(gpuStreamCreate(&s->copyStream));
 
   size_t colBytes = (size_t)s->vecRows * (size_t)nb * sizeof(V_ELE);
   size_t rowChunk = (size_t)s->chunkRows * (size_t)NS * sizeof(V_ELE);
   for (int k = 0; k < GPU_VSTREAM_NSLOT; k++) {
-    GPU_SAFE_CALL(gpuEventCreate(&s->computeDone[k]));
-    GPU_SAFE_CALL(gpuEventCreate(&s->copyDone[k]));
-    GPU_SAFE_CALL(gpuEventRecord(s->computeDone[k], s->computeStream));
-    GPU_SAFE_CALL(gpuEventRecord(s->copyDone[k], s->copyStream));
+    GPU_CHECK_CALL(gpuEventCreate(&s->computeDone[k]));
+    GPU_CHECK_CALL(gpuEventCreate(&s->copyDone[k]));
+    GPU_CHECK_CALL(gpuEventRecord(s->computeDone[k], s->computeStream));
+    GPU_CHECK_CALL(gpuEventRecord(s->copyDone[k], s->copyStream));
 
-    GPU_SAFE_CALL(gpuMalloc((void **)&s->X[k], colBytes));
+    GPU_CHECK_CALL(gpuMalloc((void **)&s->X[k], colBytes));
     /* Columns beyond a partial last sub-block are never written by the
      * kernels; zeroed once so the full-width axpby stays finite. */
-    GPU_SAFE_CALL(gpuMemset(s->X[k], 0, colBytes));
+    GPU_CHECK_CALL(gpuMemset(s->X[k], 0, colBytes));
 
-    GPU_SAFE_CALL(gpuMalloc((void **)&s->rA[k], rowChunk));
-    GPU_SAFE_CALL(gpuMalloc((void **)&s->rB[k], rowChunk));
-    GPU_SAFE_CALL(gpuMalloc((void **)&s->rO[k], rowChunk));
+    GPU_CHECK_CALL(gpuMalloc((void **)&s->rA[k], rowChunk));
+    GPU_CHECK_CALL(gpuMalloc((void **)&s->rB[k], rowChunk));
+    GPU_CHECK_CALL(gpuMalloc((void **)&s->rO[k], rowChunk));
   }
-  GPU_SAFE_CALL(gpuMalloc((void **)&s->U, colBytes));
-  GPU_SAFE_CALL(gpuMalloc((void **)&s->W, colBytes));
-  GPU_SAFE_CALL(gpuMemset(s->U, 0, colBytes));
-  GPU_SAFE_CALL(gpuMemset(s->W, 0, colBytes));
+  GPU_CHECK_CALL(gpuMalloc((void **)&s->U, colBytes));
+  GPU_CHECK_CALL(gpuMalloc((void **)&s->W, colBytes));
+  GPU_CHECK_CALL(gpuMemset(s->U, 0, colBytes));
+  GPU_CHECK_CALL(gpuMemset(s->W, 0, colBytes));
   size_t nn = (size_t)NS * (size_t)NS;
-  GPU_SAFE_CALL(gpuMalloc((void **)&s->G, nn * sizeof(double)));
-  GPU_SAFE_CALL(gpuMalloc((void **)&s->B, nn * sizeof(double)));
-  GPU_SAFE_CALL(gpuMalloc((void **)&s->eval, (size_t)NS * sizeof(double)));
-  GPU_SAFE_CALL(gpuMalloc((void **)&s->sel, (size_t)NS * sizeof(int)));
-  GPU_SAFE_CALL(gpuMalloc((void **)&s->res2, (size_t)NS * sizeof(double)));
+  GPU_CHECK_CALL(gpuMalloc((void **)&s->G, nn * sizeof(double)));
+  GPU_CHECK_CALL(gpuMalloc((void **)&s->B, nn * sizeof(double)));
+  GPU_CHECK_CALL(gpuMalloc((void **)&s->eval, (size_t)NS * sizeof(double)));
+  GPU_CHECK_CALL(gpuMalloc((void **)&s->sel, (size_t)NS * sizeof(int)));
+  GPU_CHECK_CALL(gpuMalloc((void **)&s->res2, (size_t)NS * sizeof(double)));
   ensurePartial(s, (size_t)gramSubs(NS) * nn);
-  GPU_SAFE_CALL(gpuDeviceSynchronize());
+  GPU_CHECK_CALL(gpuDeviceSynchronize());
 
   double mib = 1.0 / (1024.0 * 1024.0);
   if (verbose) {
@@ -274,7 +275,7 @@ extern "C" GpuVectorStream *gpu_vstream_init(
    * and device and the filter runs ~6x slower per row. Warn while there
    * is still a knob to turn (a smaller cheb_nb halves the scratch). */
   size_t freeB = 0, totalB = 0;
-  GPU_SAFE_CALL(GCXX_RUNTIME_BACKEND(MemGetInfo)(&freeB, &totalB));
+  GPU_CHECK_CALL(GCXX_RUNTIME_BACKEND(MemGetInfo)(&freeB, &totalB));
   size_t matrixB = 0;
 #ifdef SCS
   matrixB = (size_t)A->nElems * (sizeof(V_ELE) + sizeof(CG_UINT)) +
@@ -308,28 +309,28 @@ extern "C" void gpu_vstream_free(GpuVectorStream *s)
   if (s == NULL) {
     return;
   }
-  GPU_SAFE_CALL(gpuStreamSynchronize(s->computeStream));
-  GPU_SAFE_CALL(gpuStreamSynchronize(s->copyStream));
+  GPU_CHECK_CALL(gpuStreamSynchronize(s->computeStream));
+  GPU_CHECK_CALL(gpuStreamSynchronize(s->copyStream));
   for (int k = 0; k < GPU_VSTREAM_NSLOT; k++) {
-    GPU_SAFE_CALL(gpuFree(s->X[k]));
-    GPU_SAFE_CALL(gpuFree(s->rA[k]));
-    GPU_SAFE_CALL(gpuFree(s->rB[k]));
-    GPU_SAFE_CALL(gpuFree(s->rO[k]));
-    GPU_SAFE_CALL(gpuEventDestroy(s->computeDone[k]));
-    GPU_SAFE_CALL(gpuEventDestroy(s->copyDone[k]));
+    GPU_CHECK_CALL(gpuFree(s->X[k]));
+    GPU_CHECK_CALL(gpuFree(s->rA[k]));
+    GPU_CHECK_CALL(gpuFree(s->rB[k]));
+    GPU_CHECK_CALL(gpuFree(s->rO[k]));
+    GPU_CHECK_CALL(gpuEventDestroy(s->computeDone[k]));
+    GPU_CHECK_CALL(gpuEventDestroy(s->copyDone[k]));
   }
-  GPU_SAFE_CALL(gpuFree(s->U));
-  GPU_SAFE_CALL(gpuFree(s->W));
+  GPU_CHECK_CALL(gpuFree(s->U));
+  GPU_CHECK_CALL(gpuFree(s->W));
   if (s->partial != NULL) {
-    GPU_SAFE_CALL(gpuFree(s->partial));
+    GPU_CHECK_CALL(gpuFree(s->partial));
   }
-  GPU_SAFE_CALL(gpuFree(s->G));
-  GPU_SAFE_CALL(gpuFree(s->B));
-  GPU_SAFE_CALL(gpuFree(s->eval));
-  GPU_SAFE_CALL(gpuFree(s->sel));
-  GPU_SAFE_CALL(gpuFree(s->res2));
-  GPU_SAFE_CALL(gpuStreamDestroy(s->computeStream));
-  GPU_SAFE_CALL(gpuStreamDestroy(s->copyStream));
+  GPU_CHECK_CALL(gpuFree(s->G));
+  GPU_CHECK_CALL(gpuFree(s->B));
+  GPU_CHECK_CALL(gpuFree(s->eval));
+  GPU_CHECK_CALL(gpuFree(s->sel));
+  GPU_CHECK_CALL(gpuFree(s->res2));
+  GPU_CHECK_CALL(gpuStreamDestroy(s->computeStream));
+  GPU_CHECK_CALL(gpuStreamDestroy(s->copyStream));
   free(s);
 }
 
@@ -367,8 +368,8 @@ static void drainColBlock(
   CG_UINT v0       = (CG_UINT)i * nb;
   CG_UINT w        = MIN(nb, ncols - v0);
   size_t bytes     = (size_t)w * sizeof(V_ELE);
-  GPU_SAFE_CALL(gpuStreamWaitEvent(s->copyStream, s->computeDone[k], 0));
-  GPU_SAFE_CALL(gpuMemcpy2DAsync(outH + v0,
+  GPU_CHECK_CALL(gpuStreamWaitEvent(s->copyStream, s->computeDone[k], 0));
+  GPU_CHECK_CALL(gpuMemcpy2DAsync(outH + v0,
       (size_t)ncols * sizeof(V_ELE),
       outBuf[k],
       (size_t)nb * sizeof(V_ELE),
@@ -400,11 +401,11 @@ static void colBlockPipeline(GpuVectorStream *s,
 
     /* Slot k is free once its previous compute finished; first drain its
      * previous result to the host, then load the next input. */
-    GPU_SAFE_CALL(gpuStreamWaitEvent(s->copyStream, s->computeDone[k], 0));
+    GPU_CHECK_CALL(gpuStreamWaitEvent(s->copyStream, s->computeDone[k], 0));
     if (outH != NULL && i >= GPU_VSTREAM_NSLOT) {
       drainColBlock(s, i - GPU_VSTREAM_NSLOT, ncols, outH, outBuf);
     }
-    GPU_SAFE_CALL(gpuMemcpy2DAsync(s->X[k],
+    GPU_CHECK_CALL(gpuMemcpy2DAsync(s->X[k],
         devPitch,
         inH + v0,
         hostPitch,
@@ -413,11 +414,11 @@ static void colBlockPipeline(GpuVectorStream *s,
         gpuMemcpyHostToDevice,
         s->copyStream));
     s->h2dBytes += wB * (size_t)s->vecRows;
-    GPU_SAFE_CALL(gpuEventRecord(s->copyDone[k], s->copyStream));
+    GPU_CHECK_CALL(gpuEventRecord(s->copyDone[k], s->copyStream));
 
-    GPU_SAFE_CALL(gpuStreamWaitEvent(s->computeStream, s->copyDone[k], 0));
+    GPU_CHECK_CALL(gpuStreamWaitEvent(s->computeStream, s->copyDone[k], 0));
     fn(s, k, w, ctx);
-    GPU_SAFE_CALL(gpuEventRecord(s->computeDone[k], s->computeStream));
+    GPU_CHECK_CALL(gpuEventRecord(s->computeDone[k], s->computeStream));
   }
 
   /* Drain the last NSLOT results. */
@@ -427,8 +428,8 @@ static void colBlockPipeline(GpuVectorStream *s,
       drainColBlock(s, i, ncols, outH, outBuf);
     }
   }
-  GPU_SAFE_CALL(gpuStreamSynchronize(s->computeStream));
-  GPU_SAFE_CALL(gpuStreamSynchronize(s->copyStream));
+  GPU_CHECK_CALL(gpuStreamSynchronize(s->computeStream));
+  GPU_CHECK_CALL(gpuStreamSynchronize(s->copyStream));
   s->colPasses++;
 }
 
@@ -540,8 +541,8 @@ static void drainRowChunk(GpuVectorStream *s, int i, V_ELE *outH, CG_UINT ldOut)
   CG_UINT r0       = (CG_UINT)i * cr;
   CG_UINT rows     = MIN(cr, s->vecRows - r0);
   size_t bytes     = (size_t)rows * (size_t)ldOut * sizeof(V_ELE);
-  GPU_SAFE_CALL(gpuStreamWaitEvent(s->copyStream, s->computeDone[k], 0));
-  GPU_SAFE_CALL(gpuMemcpyAsync(
+  GPU_CHECK_CALL(gpuStreamWaitEvent(s->copyStream, s->computeDone[k], 0));
+  GPU_CHECK_CALL(gpuMemcpyAsync(
       outH + (size_t)r0 * ldOut, s->rO[k], bytes, gpuMemcpyDeviceToHost, s->copyStream));
   s->d2hBytes += bytes;
 }
@@ -564,24 +565,24 @@ static void rowChunkPipeline(GpuVectorStream *s,
     CG_UINT r0   = (CG_UINT)i * cr;
     CG_UINT rows = MIN(cr, total - r0);
 
-    GPU_SAFE_CALL(gpuStreamWaitEvent(s->copyStream, s->computeDone[k], 0));
+    GPU_CHECK_CALL(gpuStreamWaitEvent(s->copyStream, s->computeDone[k], 0));
     if (outH != NULL && i >= GPU_VSTREAM_NSLOT) {
       drainRowChunk(s, i - GPU_VSTREAM_NSLOT, outH, ldOut);
     }
     size_t inBytes = (size_t)rows * (size_t)ld * sizeof(V_ELE);
-    GPU_SAFE_CALL(gpuMemcpyAsync(
+    GPU_CHECK_CALL(gpuMemcpyAsync(
         s->rA[k], Ah + (size_t)r0 * ld, inBytes, gpuMemcpyHostToDevice, s->copyStream));
     s->h2dBytes += inBytes;
     if (Bh != NULL) {
-      GPU_SAFE_CALL(gpuMemcpyAsync(
+      GPU_CHECK_CALL(gpuMemcpyAsync(
           s->rB[k], Bh + (size_t)r0 * ld, inBytes, gpuMemcpyHostToDevice, s->copyStream));
       s->h2dBytes += inBytes;
     }
-    GPU_SAFE_CALL(gpuEventRecord(s->copyDone[k], s->copyStream));
+    GPU_CHECK_CALL(gpuEventRecord(s->copyDone[k], s->copyStream));
 
-    GPU_SAFE_CALL(gpuStreamWaitEvent(s->computeStream, s->copyDone[k], 0));
+    GPU_CHECK_CALL(gpuStreamWaitEvent(s->computeStream, s->copyDone[k], 0));
     fn(s, k, r0, rows, ctx);
-    GPU_SAFE_CALL(gpuEventRecord(s->computeDone[k], s->computeStream));
+    GPU_CHECK_CALL(gpuEventRecord(s->computeDone[k], s->computeStream));
   }
 
   if (outH != NULL) {
@@ -590,8 +591,8 @@ static void rowChunkPipeline(GpuVectorStream *s,
       drainRowChunk(s, i, outH, ldOut);
     }
   }
-  GPU_SAFE_CALL(gpuStreamSynchronize(s->computeStream));
-  GPU_SAFE_CALL(gpuStreamSynchronize(s->copyStream));
+  GPU_CHECK_CALL(gpuStreamSynchronize(s->computeStream));
+  GPU_CHECK_CALL(gpuStreamSynchronize(s->copyStream));
   s->rowPasses++;
 }
 
@@ -616,12 +617,12 @@ extern "C" void gpu_vstream_gram(
   NVTX_RANGE_PUSH_C("gpu.vstream.gram", NVTX_C_RR);
   size_t mm = (size_t)m * (size_t)m;
   ensurePartial(s, (size_t)gramSubs(m) * mm);
-  GPU_SAFE_CALL(gpuMemsetAsync(s->G, 0, mm * sizeof(double), s->computeStream));
+  GPU_CHECK_CALL(gpuMemsetAsync(s->G, 0, mm * sizeof(double), s->computeStream));
   GramCtx c;
   c.m    = m;
   c.useB = (Bh != NULL && Bh != Ah);
   rowChunkPipeline(s, Ah, c.useB ? Bh : NULL, (CG_UINT)m, NULL, 0, gramChunk, &c);
-  GPU_SAFE_CALL(gpuMemcpy(Gh, s->G, mm * sizeof(double), gpuMemcpyDeviceToHost));
+  GPU_CHECK_CALL(gpuMemcpy(Gh, s->G, mm * sizeof(double), gpuMemcpyDeviceToHost));
   NVTX_RANGE_POP();
 }
 
@@ -643,7 +644,7 @@ extern "C" void gpu_vstream_update(
     GpuVectorStream *s, V_ELE *Yh, int m, const double *Bh, int mOut)
 {
   NVTX_RANGE_PUSH_C("gpu.vstream.update", NVTX_C_ORTHO);
-  GPU_SAFE_CALL(gpuMemcpy(
+  GPU_CHECK_CALL(gpuMemcpy(
       s->B, Bh, (size_t)m * (size_t)mOut * sizeof(double), gpuMemcpyHostToDevice));
   UpdCtx c;
   c.m    = m;
@@ -691,16 +692,16 @@ extern "C" void gpu_vstream_ritzResiduals(GpuVectorStream *s,
   /* Sized for the largest chunk so no reallocation happens mid-pipeline. */
   CG_UINT maxBlocks = (s->chunkRows + RES_ROWS - 1) / RES_ROWS;
   ensurePartial(s, (size_t)maxBlocks * (size_t)nsel);
-  GPU_SAFE_CALL(gpuMemcpy(
+  GPU_CHECK_CALL(gpuMemcpy(
       s->B, evec, (size_t)m * (size_t)m * sizeof(double), gpuMemcpyHostToDevice));
-  GPU_SAFE_CALL(gpuMemcpy(s->eval, eval, (size_t)m * sizeof(double), gpuMemcpyHostToDevice));
-  GPU_SAFE_CALL(gpuMemcpy(s->sel, sel, (size_t)nsel * sizeof(int), gpuMemcpyHostToDevice));
-  GPU_SAFE_CALL(gpuMemset(s->res2, 0, (size_t)nsel * sizeof(double)));
+  GPU_CHECK_CALL(gpuMemcpy(s->eval, eval, (size_t)m * sizeof(double), gpuMemcpyHostToDevice));
+  GPU_CHECK_CALL(gpuMemcpy(s->sel, sel, (size_t)nsel * sizeof(int), gpuMemcpyHostToDevice));
+  GPU_CHECK_CALL(gpuMemset(s->res2, 0, (size_t)nsel * sizeof(double)));
   ResCtx c;
   c.m    = m;
   c.nsel = nsel;
   rowChunkPipeline(s, Yh, AYh, (CG_UINT)m, NULL, 0, ritzChunk, &c);
-  GPU_SAFE_CALL(gpuMemcpy(res2, s->res2, (size_t)nsel * sizeof(double), gpuMemcpyDeviceToHost));
+  GPU_CHECK_CALL(gpuMemcpy(res2, s->res2, (size_t)nsel * sizeof(double), gpuMemcpyDeviceToHost));
   NVTX_RANGE_POP();
 }
 
@@ -710,13 +711,13 @@ extern "C" void gpu_vstream_ritzResiduals(GpuVectorStream *s,
 extern "C" void *gpu_allocate_host(size_t bytes)
 {
   void *p = NULL;
-  GPU_SAFE_CALL(gpuMallocHost(&p, bytes));
+  GPU_CHECK_CALL(gpuMallocHost(&p, bytes));
   return p;
 }
 
 extern "C" void gpu_free_host(void *p)
 {
   if (p != NULL) {
-    GPU_SAFE_CALL(gpuFreeHost(p));
+    GPU_CHECK_CALL(gpuFreeHost(p));
   }
 }

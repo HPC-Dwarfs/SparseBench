@@ -49,9 +49,9 @@ static void drainSection(SectionTimer *t, int section)
   if (!s->pending) {
     return;
   }
-  GPU_SAFE_CALL(gpuEventSynchronize(s->stop));
+  GPU_CHECK_CALL(gpuEventSynchronize(s->stop));
   float ms = 0.0f;
-  GPU_SAFE_CALL(gpuEventElapsedTime(&ms, s->start, s->stop));
+  GPU_CHECK_CALL(gpuEventElapsedTime(&ms, s->start, s->stop));
   s->totalSec += (double)ms * 1.0e-3;
   s->counts++;
   s->pending = 0;
@@ -73,8 +73,8 @@ extern "C" SectionTimer *sectionTimerCreate(int nsections)
     return NULL;
   }
   for (int i = 0; i < nsections; i++) {
-    GPU_SAFE_CALL(gpuEventCreate(&t->sec[i].start));
-    GPU_SAFE_CALL(gpuEventCreate(&t->sec[i].stop));
+    GPU_CHECK_CALL(gpuEventCreate(&t->sec[i].start));
+    GPU_CHECK_CALL(gpuEventCreate(&t->sec[i].stop));
     t->sec[i].stream = (gpuStream_t)0;
   }
   return t;
@@ -86,8 +86,8 @@ extern "C" void sectionTimerFree(SectionTimer *t)
     return;
   }
   for (int i = 0; i < t->nsections; i++) {
-    GPU_SAFE_CALL(gpuEventDestroy(t->sec[i].start));
-    GPU_SAFE_CALL(gpuEventDestroy(t->sec[i].stop));
+    GPU_CHECK_CALL(gpuEventDestroy(t->sec[i].start));
+    GPU_CHECK_CALL(gpuEventDestroy(t->sec[i].stop));
   }
   free(t->sec);
   free(t);
@@ -100,7 +100,7 @@ extern "C" void sectionTimerStart(SectionTimer *t, int section)
   }
   drainSection(t, section); /* else the previous interval is lost */
   t->sec[section].wallStart = getTimeStamp();
-  GPU_SAFE_CALL(gpuEventRecord(t->sec[section].start, t->sec[section].stream));
+  GPU_CHECK_CALL(gpuEventRecord(t->sec[section].start, t->sec[section].stream));
 }
 
 extern "C" void sectionTimerStop(SectionTimer *t, int section)
@@ -108,7 +108,7 @@ extern "C" void sectionTimerStop(SectionTimer *t, int section)
   if (!sectionOk(t, section)) {
     return;
   }
-  GPU_SAFE_CALL(gpuEventRecord(t->sec[section].stop, t->sec[section].stream));
+  GPU_CHECK_CALL(gpuEventRecord(t->sec[section].stop, t->sec[section].stream));
   t->sec[section].pending = 1;
   t->sec[section].wallSec += getTimeStamp() - t->sec[section].wallStart;
 }

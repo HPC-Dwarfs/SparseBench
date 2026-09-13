@@ -32,7 +32,7 @@ static size_t g_gram_partial_cap = 0;
 extern "C" void gpu_chebfd_scratch_free(void)
 {
   if (g_gram_partial != NULL) {
-    GPU_SAFE_CALL(gpuFree(g_gram_partial));
+    GPU_CHECK_CALL(gpuFree(g_gram_partial));
     g_gram_partial     = NULL;
     g_gram_partial_cap = 0;
   }
@@ -152,7 +152,7 @@ extern "C" void gpu_gramYtAY(
       (size_t)gramSubs(m) * (size_t)m * (size_t)m,
       sizeof(double));
   launchGram(nr, m, Ye, (CG_UINT)m, AYe, (CG_UINT)m, g_gram_partial, H, 0, 0);
-  GPU_SAFE_CALL(gpuDeviceSynchronize());
+  GPU_CHECK_CALL(gpuDeviceSynchronize());
   NVTX_RANGE_POP();
 }
 
@@ -175,6 +175,6 @@ extern "C" void gpu_computeRitzResidual(DMatrix *Y,
   int blocks = (int)((nr + ROWS_PER_BLOCK - 1) / ROWS_PER_BLOCK);
   kernel_ritz_residual<<<blocks, dim3(WARP, ROWS_PER_BLOCK)>>>(
       nr, m, Y->entries, AY->entries, evk, evalk, avbuf);
-  GPU_SAFE_CALL(gpuDeviceSynchronize());
+  GPU_CHECK_CALL(gpuDeviceSynchronize());
   NVTX_RANGE_POP();
 }

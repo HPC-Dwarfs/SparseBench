@@ -76,7 +76,7 @@ extern "C" void gpu_waxpby3_sync(CG_UINT n,
 {
   NVTX_RANGE_PUSH_C("gpu.waxpby3", NVTX_C_VECTOR);
   gpu_waxpby3(n, a, x, b, y, c, z, w);
-  GPU_SAFE_CALL(gpuDeviceSynchronize());
+  GPU_CHECK_CALL(gpuDeviceSynchronize());
   NVTX_RANGE_POP();
 }
 
@@ -126,7 +126,7 @@ static V_ELE *g_ddot_result_d = NULL;
 static void ensure_ddot_result(void)
 {
   if (g_ddot_result_d == NULL) {
-    GPU_SAFE_CALL(gpuMalloc((void **)&g_ddot_result_d, sizeof(V_ELE)));
+    GPU_CHECK_CALL(gpuMalloc((void **)&g_ddot_result_d, sizeof(V_ELE)));
   }
 }
 
@@ -142,7 +142,7 @@ extern "C" void gpu_ddot_device(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE
   /* atomicAdd accumulates, so the scalar starts each dot from zero. The
    * async zero is enqueued on the same stream as the kernel, so ordering
    * is guaranteed and the host never blocks on it. */
-  GPU_SAFE_CALL(gpuMemsetAsync(result_d, 0, sizeof(V_ELE), 0));
+  GPU_CHECK_CALL(gpuMemsetAsync(result_d, 0, sizeof(V_ELE), 0));
 
   kernel_ddot<<<blocks, threads>>>(n, x, y, result_d);
 }
@@ -152,7 +152,7 @@ extern "C" void gpu_ddot(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *resul
   ensure_ddot_result();
   gpu_ddot_device(n, x, y, g_ddot_result_d);
 
-  GPU_SAFE_CALL(gpuMemcpy(result, g_ddot_result_d, sizeof(V_ELE), gpuMemcpyDeviceToHost));
+  GPU_CHECK_CALL(gpuMemcpy(result, g_ddot_result_d, sizeof(V_ELE), gpuMemcpyDeviceToHost));
 }
 
 /* ------------------------------------------------------------------ */
@@ -161,10 +161,10 @@ extern "C" void gpu_ddot(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *resul
 extern "C" void gpu_init(int device)
 {
   NVTX_RANGE_PUSH_C("gpu.init", NVTX_C_SETUP);
-  GPU_SAFE_CALL(GCXX_RUNTIME_BACKEND(SetDevice)(device));
+  GPU_CHECK_CALL(GCXX_RUNTIME_BACKEND(SetDevice)(device));
 
   gpuDeviceProp_t prop;
-  GPU_SAFE_CALL(GCXX_RUNTIME_BACKEND(GetDeviceProperties)(&prop, device));
+  GPU_CHECK_CALL(GCXX_RUNTIME_BACKEND(GetDeviceProperties)(&prop, device));
   printf("%s device: %s (compute %d.%d)\n",
       GPU_BACKEND_STR,
       prop.name,
@@ -178,10 +178,10 @@ extern "C" void gpu_finalize(void)
   NVTX_RANGE_PUSH_C("gpu.finalize", NVTX_C_SETUP);
   gpu_chebfd_scratch_free();
   if (g_ddot_result_d != NULL) {
-    GPU_SAFE_CALL(gpuFree(g_ddot_result_d));
+    GPU_CHECK_CALL(gpuFree(g_ddot_result_d));
     g_ddot_result_d = NULL;
   }
-  GPU_SAFE_CALL(GCXX_RUNTIME_BACKEND(DeviceReset)());
+  GPU_CHECK_CALL(GCXX_RUNTIME_BACKEND(DeviceReset)());
   NVTX_RANGE_POP();
 }
 
@@ -218,7 +218,7 @@ static void *allocDispatch(size_t bytes, int device)
   void *ptr = NULL;
   g_alloc_locked = 1;
   if (device && g_alloc_type == ALLOC_EXPLICIT) {
-    GPU_SAFE_CALL(gpuMalloc(&ptr, bytes));
+    GPU_CHECK_CALL(gpuMalloc(&ptr, bytes));
     return ptr;
   }
   switch (g_alloc_type) {
@@ -230,11 +230,11 @@ static void *allocDispatch(size_t bytes, int device)
     }
     return ptr;
   case ALLOC_EXPLICIT:
-    GPU_SAFE_CALL(gpuMallocHost(&ptr, bytes));
+    GPU_CHECK_CALL(gpuMallocHost(&ptr, bytes));
     return ptr;
   case ALLOC_MANAGED:
   default:
-    GPU_SAFE_CALL(gpuMallocManaged(&ptr, bytes));
+    GPU_CHECK_CALL(gpuMallocManaged(&ptr, bytes));
     return ptr;
   }
 }
@@ -253,7 +253,7 @@ static void freeDispatch(void *ptr, int device)
 {
   /* Keep in sync with allocDispatch. */
   if (device && g_alloc_type == ALLOC_EXPLICIT) {
-    GPU_SAFE_CALL(gpuFree(ptr));
+    GPU_CHECK_CALL(gpuFree(ptr));
     return;
   }
   switch (g_alloc_type) {
@@ -261,11 +261,11 @@ static void freeDispatch(void *ptr, int device)
     free(ptr);
     break;
   case ALLOC_EXPLICIT:
-    GPU_SAFE_CALL(gpuFreeHost(ptr));
+    GPU_CHECK_CALL(gpuFreeHost(ptr));
     break;
   case ALLOC_MANAGED:
   default:
-    GPU_SAFE_CALL(gpuFree(ptr));
+    GPU_CHECK_CALL(gpuFree(ptr));
     break;
   }
 }
@@ -296,7 +296,7 @@ extern "C" void gpu_waxpby_sync(
 {
   NVTX_RANGE_PUSH_C("gpu.waxpby", NVTX_C_VECTOR);
   gpu_waxpby_nosync(n, alpha, x, beta, y, w);
-  GPU_SAFE_CALL(gpuDeviceSynchronize());
+  GPU_CHECK_CALL(gpuDeviceSynchronize());
   NVTX_RANGE_POP();
 }
 
@@ -308,6 +308,6 @@ extern "C" void gpu_ddot_sync(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *
 
   /* gpuMemcpy is synchronous w.r.t. the host, so it both waits for the
    * kernel above and delivers the scalar — no separate DeviceSynchronize. */
-  GPU_SAFE_CALL(gpuMemcpy(result, g_ddot_result_d, sizeof(V_ELE), gpuMemcpyDeviceToHost));
+  GPU_CHECK_CALL(gpuMemcpy(result, g_ddot_result_d, sizeof(V_ELE), gpuMemcpyDeviceToHost));
   NVTX_RANGE_POP();
 }

@@ -315,7 +315,7 @@ extern "C" void gpu_spMVM(Matrix *m, const V_ELE *x, V_ELE *y)
 {
   NVTX_RANGE_PUSH_C("gpu.spMVM", NVTX_C_MATVEC);
   gpu_spMVM_nosync(m, x, y);
-  GPU_SAFE_CALL(gpuDeviceSynchronize());
+  GPU_CHECK_CALL(gpuDeviceSynchronize());
   NVTX_RANGE_POP();
 }
 
@@ -323,7 +323,7 @@ extern "C" void gpu_spMMVM(Matrix *m, const DMatrix *x, DMatrix *y)
 {
   NVTX_RANGE_PUSH_C("gpu.spMMVM", NVTX_C_MATVEC);
   gpu_spMMVM_nosync(m, x, y);
-  GPU_SAFE_CALL(gpuDeviceSynchronize());
+  GPU_CHECK_CALL(gpuDeviceSynchronize());
   NVTX_RANGE_POP();
 }
 
@@ -338,7 +338,7 @@ extern "C" void gpu_spMMVMFused(Matrix *m,
 {
   NVTX_RANGE_PUSH_C("gpu.spMMVMFused", NVTX_C_MATVEC);
   gpu_spMMVMFused_nosync(m, x, cA, p, cP, q, cQ, y);
-  GPU_SAFE_CALL(gpuDeviceSynchronize());
+  GPU_CHECK_CALL(gpuDeviceSynchronize());
   NVTX_RANGE_POP();
 }
 
@@ -353,7 +353,7 @@ extern "C" void gpu_chebfdOp(Matrix *m,
     DMatrix *x)
 {
   gpu_chebfdOp_nosync(m, w, cA, cP, q, cQ, y, gc, x);
-  GPU_SAFE_CALL(gpuDeviceSynchronize());
+  GPU_CHECK_CALL(gpuDeviceSynchronize());
 }
 
 /* ------------------------------------------------------------------ */

@@ -37,9 +37,9 @@ static inline void gpuGrowBuffer(void **p, size_t *capElems, size_t elems, size_
 {
   if (elems > *capElems) {
     if (*p != NULL) {
-      GPU_SAFE_CALL(gpuFree(*p));
+      GPU_CHECK_CALL(gpuFree(*p));
     }
-    GPU_SAFE_CALL(gpuMalloc(p, elems * elemSize));
+    GPU_CHECK_CALL(gpuMalloc(p, elems * elemSize));
     *capElems = elems;
   }
 }
