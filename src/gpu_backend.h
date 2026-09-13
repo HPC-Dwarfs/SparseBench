@@ -109,12 +109,12 @@ static inline GCXX_RUNTIME_BACKEND(Error_t) gpuMemPrefetch(
   return cudaMemPrefetchAsync(ptr, bytes, loc, stream, 0);
 }
 #else
-#define gpuMemPrefetch(ptr, bytes, dev, stream)                                            \
+#define gpuMemPrefetch(ptr, bytes, dev, stream)                                          \
   GCXX_RUNTIME_BACKEND(MemPrefetchAsync)((ptr), (bytes), (dev), (stream))
 #endif
 
 /* --- Safe call macro with error checking -------------------------- */
-#define GPU_CHECK_CALL(call)                                                              \
+#define GPU_CHECK_CALL(call)                                                             \
   do {                                                                                   \
     auto err = (call);                                                                   \
     if (err != GPU_SUCCESS) {                                                            \
