@@ -175,6 +175,7 @@ extern "C" void gpu_computeRitzResidual(DMatrix *Y,
   int blocks = (int)((nr + ROWS_PER_BLOCK - 1) / ROWS_PER_BLOCK);
   kernel_ritz_residual<<<blocks, dim3(WARP, ROWS_PER_BLOCK)>>>(
       nr, m, Y->entries, AY->entries, evk, evalk, avbuf);
+  GPU_CHECK_LAUNCH();
   GPU_CHECK_CALL(gpuDeviceSynchronize());
   NVTX_RANGE_POP();
 }

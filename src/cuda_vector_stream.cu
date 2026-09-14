@@ -468,6 +468,7 @@ static void filterSubBlock(GpuVectorStream *s, int k, CG_UINT w, void *vctx)
   int blocks = (int)((n + LIN_THREADS - 1) / LIN_THREADS);
   kernel_vs_axpby3<<<blocks, LIN_THREADS, 0, st>>>(
       n, VCONST(c->gc[Np], 0), X, zero, X, zero, X, B1);
+  GPU_CHECK_LAUNCH();
   /* k = Np-1: b = gc_k x + 2 A' b_{k+1}   (b_{k+2} = 0) */
   gpu_launch_chebfd(A, st, B1, two * c->alpha, B1, two * c->beta, NULL, zero, B2, zero,
       NULL, X, VCONST(c->gc[Np - 1], 0), w, ld);
@@ -638,6 +639,7 @@ static void updateChunk(GpuVectorStream *s, int k, CG_UINT r0, CG_UINT rows, voi
   dim3 grid((rows + UPD_ROWS - 1) / UPD_ROWS, (c->mOut + UPD_COLS - 1) / UPD_COLS);
   kernel_vs_block_update<<<grid, dim3(UPD_COLS, UPD_ROWS), 0, s->computeStream>>>(
       rows, c->m, s->rA[k], (CG_UINT)c->m, s->B, c->mOut, s->rO[k]);
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_vstream_update(
@@ -671,8 +673,10 @@ static void ritzChunk(GpuVectorStream *s, int k, CG_UINT r0, CG_UINT rows, void 
   dim3 grid(nBlocks, (c->nsel + RES_COLS - 1) / RES_COLS);
   kernel_vs_ritz_chunk<<<grid, dim3(RES_COLS, RES_ROWS), 0, s->computeStream>>>(
       rows, c->m, s->rA[k], s->rB[k], s->B, s->eval, s->sel, c->nsel, s->partial);
+  GPU_CHECK_LAUNCH();
   kernel_vs_ritz_accum<<<c->nsel, LIN_THREADS, 0, s->computeStream>>>(
       c->nsel, nBlocks, s->partial, s->res2);
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_vstream_ritzResiduals(GpuVectorStream *s,

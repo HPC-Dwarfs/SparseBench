@@ -106,7 +106,7 @@ static inline GCXX_RUNTIME_BACKEND(Error_t) gpuMemPrefetch(
   cudaMemLocation loc;
   loc.type = cudaMemLocationTypeDevice;
   loc.id   = dev;
-  return cudaMemPrefetchAsync(ptr, bytes, loc, stream, 0);
+  return cudaMemPrefetchAsync(ptr, bytes, loc, 0, stream);
 }
 #else
 #define gpuMemPrefetch(ptr, bytes, dev, stream)                                          \
@@ -126,6 +126,9 @@ static inline GCXX_RUNTIME_BACKEND(Error_t) gpuMemPrefetch(
       exit(EXIT_FAILURE);                                                                \
     }                                                                                    \
   } while (0)
+
+// Launch check
+#define GPU_CHECK_LAUNCH() GPU_CHECK_CALL(GCXX_RUNTIME_BACKEND(GetLastError)())
 
 /* --- Portable type aliases ---------------------------------------- */
 typedef GCXX_RUNTIME_BACKEND(Error_t) gpuError_t;

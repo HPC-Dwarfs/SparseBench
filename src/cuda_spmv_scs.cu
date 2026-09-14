@@ -101,6 +101,7 @@ extern "C" void gpu_spmv_scs(CG_UINT nChunks,
   int blocks  = (int)((nChunks * C + threads - 1) / threads);
   kernel_spmv_scs<<<blocks, threads>>>(
       nChunks, C, 0, 0, chunkPtr, chunkLens, colInd, val, x, y);
+  GPU_CHECK_LAUNCH();
 }
 
 /* ------------------------------------------------------------------ */
@@ -463,6 +464,7 @@ static void launchChebfdPart(const GpuPartView *v, gpuStream_t stream, void *ua)
         a->acc,
         a->r,
         a->cR);
+    GPU_CHECK_LAUNCH();
     return;
   }
   if (pairOk && g_chebfdVec >= 2) {
@@ -490,6 +492,7 @@ static void launchChebfdPart(const GpuPartView *v, gpuStream_t stream, void *ua)
         a->acc,
         a->r,
         a->cR);
+    GPU_CHECK_LAUNCH();
     return;
   }
 #endif
@@ -516,6 +519,7 @@ static void launchChebfdPart(const GpuPartView *v, gpuStream_t stream, void *ua)
       a->acc,
       a->r,
       a->cR);
+  GPU_CHECK_LAUNCH();
 }
 
 /* Plain SpMMV on one part. */
@@ -544,6 +548,7 @@ static void launchSpmmvPart(const GpuPartView *v, gpuStream_t stream, void *ua)
       v->val,
       a->x,
       a->y);
+  GPU_CHECK_LAUNCH();
 }
 
 /* Identity part view of the whole matrix (resident mode: the kernels read
@@ -578,6 +583,7 @@ extern "C" void gpu_spMMVM_nosync(Matrix *m, const DMatrix *x, DMatrix *y)
       m->val,
       x->entries,
       y->entries);
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_spMMVMFused_nosync(Matrix *m,
@@ -610,6 +616,7 @@ extern "C" void gpu_spMMVMFused_nosync(Matrix *m,
       NULL,
       NULL,
       VCONST(0, 0));
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_chebfdOp_nosync(Matrix *m,
@@ -643,6 +650,7 @@ extern "C" void gpu_chebfdOp_nosync(Matrix *m,
       x->entries,
       NULL,
       VCONST(0, 0));
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_spMVM(Matrix *m, const V_ELE *x, V_ELE *y)

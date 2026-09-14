@@ -63,6 +63,7 @@ extern "C" void gpu_waxpby3(CG_UINT n,
   int threads = 256;
   int blocks  = (int)((n + threads - 1) / threads);
   kernel_waxpby3<<<blocks, threads>>>(n, a, x, b, y, c, z, w);
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_waxpby3_sync(CG_UINT n,
@@ -145,6 +146,7 @@ extern "C" void gpu_ddot_device(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE
   GPU_CHECK_CALL(gpuMemsetAsync(result_d, 0, sizeof(V_ELE), 0));
 
   kernel_ddot<<<blocks, threads>>>(n, x, y, result_d);
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_ddot(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *result)
@@ -289,6 +291,7 @@ extern "C" void gpu_waxpby_nosync(
   int threads = 256;
   int blocks  = (n + threads - 1) / threads;
   kernel_waxpby<<<blocks, threads>>>(n, alpha, x, beta, y, w);
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_waxpby_sync(

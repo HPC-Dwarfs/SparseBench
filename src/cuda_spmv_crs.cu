@@ -60,6 +60,7 @@ extern "C" void gpu_spmv_crs(CG_UINT numRows,
   int threads = 256;
   int blocks  = (numRows + threads - 1) / threads;
   kernel_spmv_crs<<<blocks, threads>>>(numRows, 0, 0, rowPtr, colInd, val, x, y);
+  GPU_CHECK_LAUNCH();
 }
 
 /* ------------------------------------------------------------------ */
@@ -201,6 +202,7 @@ static void launchChebfdPart(const GpuPartView *v, gpuStream_t stream, void *ua)
       a->acc,
       a->r,
       a->cR);
+  GPU_CHECK_LAUNCH();
 }
 
 typedef struct {
@@ -226,6 +228,7 @@ static void launchSpmmvPart(const GpuPartView *v, gpuStream_t stream, void *ua)
       v->val,
       a->x,
       a->y);
+  GPU_CHECK_LAUNCH();
 }
 
 static void wholeMatrixView(const Matrix *m, GpuPartView *v)
@@ -248,6 +251,7 @@ extern "C" void gpu_spMMVM_nosync(Matrix *m, const DMatrix *x, DMatrix *y)
 {
   kernel_spmmv_crs<<<blockGrid(m, x->nc), dim3(VEC_TILE, ROW_TILE)>>>(
       m->nr, x->nc, x->nc, m->rowPtr, 0, 0, m->colInd, m->val, x->entries, y->entries);
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_spMMVMFused_nosync(Matrix *m,
@@ -278,6 +282,7 @@ extern "C" void gpu_spMMVMFused_nosync(Matrix *m,
       NULL,
       NULL,
       VCONST(0, 0));
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_chebfdOp_nosync(Matrix *m,
@@ -309,6 +314,7 @@ extern "C" void gpu_chebfdOp_nosync(Matrix *m,
       x->entries,
       NULL,
       VCONST(0, 0));
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_spMVM(Matrix *m, const V_ELE *x, V_ELE *y)
