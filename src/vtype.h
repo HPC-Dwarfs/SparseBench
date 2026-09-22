@@ -5,6 +5,8 @@
 #ifndef __VTYPE_H_
 #define __VTYPE_H_
 
+#include <math.h>
+
 #include "util.h"
 
 #ifdef USE_COMPLEX
@@ -57,6 +59,9 @@
 #define V_ELE CG_FLOAT
 #define VCONST(r, i) (r)
 #define VCONJ(z) (z)
+#define VREAL(z) (z)
+#define VIMAG(z) (0.0)
+#define VABS(z) fabs((double)(z))
 #if PRECISION == 1
 #define PRECISION_STRING "float"
 #else
