@@ -2,7 +2,11 @@
  * All rights reserved. This file is part of SparseBench.
  * Use of this source code is governed by a MIT style
  * license that can be found in the LICENSE file. */
-#ifdef _MPI
+/* This file only contains MPI-specific code. Provide a placeholder so the
+ * translation unit is never empty, which avoids -Wpedantic warnings. */
+#ifndef _MPI
+typedef int matrixBinfile_dummy_t;
+#else
 #include <stdio.h>
 
 #include "mpi.h"

@@ -22,7 +22,6 @@
 
 static void initVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
 {
-/* The CRS branch only needs rowPtr, which CCRS provides as well. */
 #if defined(CRS) || defined(CCRS)
   CG_UINT numRows = m->nr;
   CG_UINT *rowPtr = m->rowPtr;
@@ -44,6 +43,7 @@ static void initVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
   CG_UINT c             = m->C;
   CG_UINT *chunkPtr     = m->chunkPtr;
   CG_UINT *chunkLens    = m->chunkLens;
+  CG_UINT *colInd       = m->colInd;
   V_ELE *val            = m->val;
   CG_UINT *oldToNewPerm = m->oldToNewPerm;
 
@@ -210,6 +210,8 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
 #ifdef SCS
   CG_UINT *oldToNewPerm = A->oldToNewPerm;
   CG_UINT *newToOldPerm = A->newToOldPerm;
+  CG_UINT *colIndScs    = A->colInd;
+  CG_UINT nElemsScs     = A->nElems;
 
   // Permute b, x (and xexact) from original to SCS ordering
   V_ELE *permTmp = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
@@ -292,6 +294,15 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
 #endif
 
   solverCheckResidual(comm, x, xexact, nrow);
+
+  deallocate(r);
+  deallocate(p);
+  deallocate(ap);
+  deallocate(x);
+  deallocate(b);
+  if (xexact != NULL) {
+    deallocate(xexact);
+  }
 
   return k;
 }

@@ -14,6 +14,15 @@
 #include "util.h"
 #include "vtype.h"
 
+#ifdef _OPENMP
+#define OMP_PARFOR _Pragma("omp parallel for schedule(static)")
+#define OMP_PARFOR_REDUCE _Pragma("omp parallel for reduction(+ : sum) schedule(static)")
+#else
+#define OMP_PARFOR
+#define OMP_PARFOR_REDUCE
+#endif
+
+
 void waxpby(const CG_UINT n,
     const V_ELE alpha,
     const V_ELE *x,
@@ -22,18 +31,18 @@ void waxpby(const CG_UINT n,
     V_ELE *const w)
 {
   if (alpha == 1.0) {
-#pragma omp parallel for schedule(static)
-    for (int i = 0; i < n; i++) {
+OMP_PARFOR
+    for (CG_UINT i = 0; i < n; i++) {
       w[i] = x[i] + beta * y[i];
     }
   } else if (beta == 1.0) {
-#pragma omp parallel for schedule(static)
-    for (int i = 0; i < n; i++) {
+OMP_PARFOR
+    for (CG_UINT i = 0; i < n; i++) {
       w[i] = alpha * x[i] + y[i];
     }
   } else {
-#pragma omp parallel for schedule(static)
-    for (int i = 0; i < n; i++) {
+OMP_PARFOR
+    for (CG_UINT i = 0; i < n; i++) {
       w[i] = alpha * x[i] + beta * y[i];
     }
   }
@@ -45,25 +54,25 @@ void ddot(const CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *result)
 
 #ifdef USE_COMPLEX
   if (y == x) {
-#pragma omp parallel for reduction(+ : sum) schedule(static)
-    for (int i = 0; i < n; i++) {
+OMP_PARFOR_REDUCE
+    for (CG_UINT i = 0; i < n; i++) {
       sum += VCONJ(x[i]) * x[i];
     }
   } else {
-#pragma omp parallel for reduction(+ : sum) schedule(static)
-    for (int i = 0; i < n; i++) {
+OMP_PARFOR_REDUCE
+    for (CG_UINT i = 0; i < n; i++) {
       sum += VCONJ(x[i]) * y[i];
     }
   }
 #else
   if (y == x) {
-#pragma omp parallel for reduction(+ : sum) schedule(static)
-    for (int i = 0; i < n; i++) {
+OMP_PARFOR_REDUCE
+    for (CG_UINT i = 0; i < n; i++) {
       sum += x[i] * x[i];
     }
   } else {
-#pragma omp parallel for reduction(+ : sum) schedule(static)
-    for (int i = 0; i < n; i++) {
+OMP_PARFOR_REDUCE
+    for (CG_UINT i = 0; i < n; i++) {
       sum += x[i] * y[i];
     }
   }

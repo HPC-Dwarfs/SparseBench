@@ -39,6 +39,7 @@ static WorkType Regions[NUMREGIONS] = {
 void profilerInit(size_t *facFlops, size_t *facWords)
 {
   LIKWID_MARKER_INIT;
+#ifdef _OPENMP
   _Pragma("omp parallel")
   {
     LIKWID_MARKER_REGISTER("WAXPBY");
@@ -50,6 +51,16 @@ void profilerInit(size_t *facFlops, size_t *facWords)
     LIKWID_MARKER_REGISTER("COMM");
     LIKWID_MARKER_REGISTER("COMM_WAIT");
   }
+#else
+  LIKWID_MARKER_REGISTER("WAXPBY");
+  LIKWID_MARKER_REGISTER("SPMVM");
+  LIKWID_MARKER_REGISTER("SPMMVM");
+  LIKWID_MARKER_REGISTER("SPMVM_LOCAL");
+  LIKWID_MARKER_REGISTER("SPMVM_EXT");
+  LIKWID_MARKER_REGISTER("DDOT");
+  LIKWID_MARKER_REGISTER("COMM");
+  LIKWID_MARKER_REGISTER("COMM_WAIT");
+#endif
 
   for (int i = 0; i < NUMREGIONS; i++) {
     T[i] = 0.0;

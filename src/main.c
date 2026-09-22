@@ -212,6 +212,9 @@ int main(int argc, char **argv)
       PROFILE(COMM, commExchange(&comm, sm.nr, x));
       PROFILE(SPMVM, spMVM(&sm, x, y));
     }
+
+    deallocate(x);
+    deallocate(y);
     break;
 
   case SPMMV: {
@@ -241,6 +244,9 @@ int main(int argc, char **argv)
     for (k = 1; k < itermax; k++) {
       PROFILE(SPMMVM, spMMVM(&sm, &x, &y));
     }
+
+    deallocate(x.entries);
+    deallocate(y.entries);
   } break;
 
   case GMRES:
@@ -263,6 +269,38 @@ int main(int argc, char **argv)
 
   profilerPrint(&comm, seq, numSeq, k);
   profilerFinalize();
+
+  /* Release matrix memory. Localization may have allocated extra structures,
+   * but the main arrays are always owned by the local GMatrix/Matrix. */
+  deallocate(m.entries);
+  deallocate(m.rowPtr);
+  if (m.rowLocalEnd != NULL) {
+    deallocate(m.rowLocalEnd);
+  }
+  if (m.boundaryRows != NULL) {
+    deallocate(m.boundaryRows);
+  }
+
+#ifdef CRS
+  deallocate(sm.rowPtr);
+  deallocate(sm.colInd);
+  deallocate(sm.val);
+  deallocate(sm.rowLocalEnd);
+  if (sm.boundaryRows != NULL) {
+    deallocate(sm.boundaryRows);
+  }
+#elif defined(SCS)
+  deallocate(sm.colInd);
+  deallocate(sm.val);
+  deallocate(sm.chunkPtr);
+  deallocate(sm.chunkLens);
+  deallocate(sm.oldToNewPerm);
+  deallocate(sm.newToOldPerm);
+#elif defined(CCRS)
+  deallocate(sm.rowPtr);
+  deallocate(sm.entries);
+#endif
+
   commFinalize(&comm);
 
   return EXIT_SUCCESS;

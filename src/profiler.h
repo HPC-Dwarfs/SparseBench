@@ -8,6 +8,7 @@
 #include <stddef.h>
 
 #ifdef LIKWID_PERFMON
+#ifdef _OPENMP
 #define PROFILE(tag, call)                                                               \
   _Pragma("omp parallel")                                                                \
   {                                                                                      \
@@ -20,6 +21,14 @@
   {                                                                                      \
     LIKWID_MARKER_STOP(#tag);                                                            \
   }
+#else
+#define PROFILE(tag, call)                                                               \
+  LIKWID_MARKER_START(#tag);                                                             \
+  ts = getTimeStamp();                                                                   \
+  call;                                                                                  \
+  T[tag] += (getTimeStamp() - ts);                                                       \
+  LIKWID_MARKER_STOP(#tag);
+#endif
 #else /* LIKWID_PERFMON */
 #define PROFILE(tag, call)                                                               \
   ts = getTimeStamp();                                                                   \

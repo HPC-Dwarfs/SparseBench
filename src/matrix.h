@@ -58,7 +58,7 @@ typedef struct {
 
 typedef struct {
   size_t count;
-  int nr, nnz;
+  int nr, nc, nnz;
   int totalNr, totalNnz; // number of total rows and non zeros
   int startRow, stopRow; // range of rows owned by current rank
   MMEntry *entries;
