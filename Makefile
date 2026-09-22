@@ -27,22 +27,6 @@ include config.mk
 include $(MAKE_DIR)/include_$(TOOLCHAIN).mk
 INCLUDES  += -I$(SRC_DIR) -I$(BUILD_DIR)
 
-# Derived feature options. A config.mk copied from an older release predates
-# the overlap switches entirely (the variables are not even assigned there), so
-# supply the defaults and derived defines here. This keeps ENABLE_OVERLAP=true
-# effective instead of silently falling back to the blocking exchange.
-# (Duplicate -D flags with identical values are harmless.)
-ENABLE_OVERLAP ?= true
-ifeq ($(strip $(ENABLE_OVERLAP)),true)
-ifeq (,$(findstring -DENABLE_OVERLAP,$(DEFINES)))
-DEFINES += -DENABLE_OVERLAP
-endif
-endif
-OVERLAP_NUDGE_CHUNKS ?= 8
-ifeq (,$(findstring -DOVERLAP_NUDGE_CHUNKS,$(OPTIONS)))
-OPTIONS += -DOVERLAP_NUDGE_CHUNKS=$(OVERLAP_NUDGE_CHUNKS)
-endif
-
 VPATH     = $(SRC_DIR)
 ASM       = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.s,$(wildcard $(SRC_DIR)/*.c))
 OBJ       = $(filter-out $(BUILD_DIR)/matrix-%, $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o,$(wildcard $(SRC_DIR)/*.c)))
