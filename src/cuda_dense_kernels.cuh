@@ -20,17 +20,6 @@
 #define GRAM_SUBS 256
 #define GRAM_PARTIAL_MAX_BYTES ((size_t)256 << 20)
 
-/* Real part of V_ELE as double (under USE_COMPLEX V_ELE is a
- * thrust::complex with no implicit conversion to double). */
-__device__ __host__ static inline double asReal(V_ELE z)
-{
-#ifdef USE_COMPLEX
-  return (double)VREAL(z);
-#else
-  return (double)z;
-#endif
-}
-
 /* Grow-only device buffer: (re)allocate *p to hold at least `elems`
  * elements of `elemSize` bytes, tracking the capacity in *capElems. */
 static inline void gpuGrowBuffer(void **p, size_t *capElems, size_t elems, size_t elemSize)
@@ -49,7 +38,7 @@ static inline void gpuGrowBuffer(void **p, size_t *capElems, size_t elems, size_
 static inline int gramSubs(int m)
 {
   size_t mm    = (size_t)m * (size_t)m;
-  size_t capEl = GRAM_PARTIAL_MAX_BYTES / sizeof(double);
+  size_t capEl = GRAM_PARTIAL_MAX_BYTES / sizeof(V_ELE);
   int nSub     = GRAM_SUBS;
   while (nSub > 1 && (size_t)nSub * mm > capEl) {
     nSub--;
@@ -57,8 +46,8 @@ static inline int gramSubs(int m)
   return nSub;
 }
 
-/* partial[sub][i][j] = sum_{r in sub-range} A[r,i] * B[r,j] for i <= j over
- * `rows` rows of two row-major blocks with independent leading dims. The
+/* partial[sub][i][j] = sum_{r in sub-range} conj(A[r,i]) * B[r,j] for i <= j
+ * over `rows` rows of two row-major blocks with independent leading dims. The
  * rows are split into gridDim.z sub-ranges so the few m/GRAM_TILE tiles of a
  * small m don't leave the GPU nearly idle. Defined in cuda_chebfd_dense.cu. */
 __global__ void kernel_gram_chunk(CG_UINT rows,
@@ -67,25 +56,25 @@ __global__ void kernel_gram_chunk(CG_UINT rows,
     CG_UINT ldA,
     const V_ELE *B,
     CG_UINT ldB,
-    double *partial,
+    V_ELE *partial,
     CG_UINT rowsPerSub);
 
-/* G[i][j] (+)= sum_sub partial[sub][i][j], mirrored to G[j][i]: fixed
- * summation order (deterministic) and exactly symmetric, as jacobiEigen
+/* G[i][j] (+)= sum_sub partial[sub][i][j], mirrored to G[j][i] = conj(G[i][j]):
+ * fixed summation order (deterministic) and exactly Hermitian, as jacobiEigen
  * assumes. accumulate == 0 overwrites G, != 0 adds to it. */
 __global__ void kernel_gram_accum(
-    int m, int nSub, const double *partial, double *G, int accumulate);
+    int m, int nSub, const V_ELE *partial, V_ELE *G, int accumulate);
 
-/* One Gram pass over `rows` rows: G (+)= A^T B. `partial` must hold at least
- * gramSubs(m) * m * m doubles. */
+/* One Gram pass over `rows` rows: G (+)= A^H B. `partial` must hold at least
+ * gramSubs(m) * m * m V_ELE. */
 static inline void launchGram(CG_UINT rows,
     int m,
     const V_ELE *A,
     CG_UINT ldA,
     const V_ELE *B,
     CG_UINT ldB,
-    double *partial,
-    double *G,
+    V_ELE *partial,
+    V_ELE *G,
     int accumulate,
     gpuStream_t stream)
 {

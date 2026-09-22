@@ -102,7 +102,7 @@ __global__ void kernel_vs_block_update(CG_UINT rows,
     int m,
     const V_ELE *In,
     CG_UINT ldIn,
-    const double *B,
+    const V_ELE *B,
     int mOut,
     V_ELE *Out)
 {
@@ -111,60 +111,60 @@ __global__ void kernel_vs_block_update(CG_UINT rows,
   if (r >= rows || jo >= mOut)
     return;
   const V_ELE *in = In + (size_t)r * ldIn;
-  double acc      = 0.0;
+  V_ELE acc       = VCONST(0, 0);
   for (int i = 0; i < m; i++) {
-    acc += asReal(in[i]) * B[(size_t)i * (size_t)mOut + (size_t)jo];
+    acc += in[i] * B[(size_t)i * (size_t)mOut + (size_t)jo];
   }
-  Out[(size_t)r * (size_t)mOut + (size_t)jo] = VCONST(acc, 0);
+  Out[(size_t)r * (size_t)mOut + (size_t)jo] = acc;
 }
 
 /* Squared Ritz residual partials over one row chunk: for each selected
  * pair k = sel[t], v_r = sum_j (AY[r,j] - eval_k Y[r,j]) evec[j,k];
- * partial[block][t] = sum over the block's rows of v_r^2. */
+ * partial[block][t] = sum over the block's rows of |v_r|^2. */
 __global__ void kernel_vs_ritz_chunk(CG_UINT rows,
     int m,
     const V_ELE *Y,
     const V_ELE *AY,
-    const double *evec,
+    const V_ELE *evec,
     const double *eval,
     const int *sel,
     int nsel,
-    double *partial)
+    V_ELE *partial)
 {
-  __shared__ double sv[RES_ROWS][RES_COLS];
+  __shared__ V_ELE sv[RES_ROWS][RES_COLS];
   CG_UINT r = (CG_UINT)blockIdx.x * RES_ROWS + threadIdx.y;
   int t     = blockIdx.y * RES_COLS + threadIdx.x;
-  double v  = 0.0;
+  V_ELE v   = VCONST(0, 0);
   if (r < rows && t < nsel) {
     int k       = sel[t];
     double lam  = eval[k];
     size_t base = (size_t)r * (size_t)m;
     for (int j = 0; j < m; j++) {
-      double e = evec[(size_t)j * (size_t)m + (size_t)k];
-      v += (asReal(AY[base + j]) - lam * asReal(Y[base + j])) * e;
+      V_ELE e = evec[(size_t)j * (size_t)m + (size_t)k];
+      v += (AY[base + j] - VCONST(lam, 0) * Y[base + j]) * e;
     }
   }
-  sv[threadIdx.y][threadIdx.x] = v * v;
+  sv[threadIdx.y][threadIdx.x] = VCONJ(v) * v;
   __syncthreads();
   if (threadIdx.y == 0 && t < nsel) {
-    double s = 0.0;
+    V_ELE s = VCONST(0, 0);
     for (int y = 0; y < RES_ROWS; y++) {
       s += sv[y][threadIdx.x];
     }
-    partial[(size_t)blockIdx.x * (size_t)nsel + (size_t)t] = s;
+    partial[(size_t)blockIdx.x * (size_t)nsel + (size_t)t] = VCONST(VREAL(s), 0);
   }
 }
 
 /* res2[t] += sum_block partial[block][t]. One block per selected pair;
  * the threads stride over the row blocks and a fixed-shape shared
  * reduction folds them, so the order is deterministic. */
-__global__ void kernel_vs_ritz_accum(int nsel, CG_UINT nBlocks, const double *partial, double *res2)
+__global__ void kernel_vs_ritz_accum(int nsel, CG_UINT nBlocks, const V_ELE *partial, double *res2)
 {
   __shared__ double sh[LIN_THREADS];
   int t    = blockIdx.x;
   double s = 0.0;
   for (CG_UINT b = threadIdx.x; b < nBlocks; b += blockDim.x) {
-    s += partial[(size_t)b * (size_t)nsel + (size_t)t];
+    s += VREAL(partial[(size_t)b * (size_t)nsel + (size_t)t]);
   }
   sh[threadIdx.x] = s;
   __syncthreads();
@@ -188,7 +188,7 @@ __global__ void kernel_vs_ritz_accum(int nsel, CG_UINT nBlocks, const double *pa
  * that queued kernels still read. */
 static void ensurePartial(GpuVectorStream *s, size_t elems)
 {
-  gpuGrowBuffer((void **)&s->partial, &s->partialCap, elems, sizeof(double));
+  gpuGrowBuffer((void **)&s->partial, &s->partialCap, elems, sizeof(V_ELE));
 }
 
 extern "C" GpuVectorStream *gpu_vstream_init(
@@ -250,8 +250,8 @@ extern "C" GpuVectorStream *gpu_vstream_init(
   GPU_CHECK_CALL(gpuMemset(s->U, 0, colBytes));
   GPU_CHECK_CALL(gpuMemset(s->W, 0, colBytes));
   size_t nn = (size_t)NS * (size_t)NS;
-  GPU_CHECK_CALL(gpuMalloc((void **)&s->G, nn * sizeof(double)));
-  GPU_CHECK_CALL(gpuMalloc((void **)&s->B, nn * sizeof(double)));
+  GPU_CHECK_CALL(gpuMalloc((void **)&s->G, nn * sizeof(V_ELE)));
+  GPU_CHECK_CALL(gpuMalloc((void **)&s->B, nn * sizeof(V_ELE)));
   GPU_CHECK_CALL(gpuMalloc((void **)&s->eval, (size_t)NS * sizeof(double)));
   GPU_CHECK_CALL(gpuMalloc((void **)&s->sel, (size_t)NS * sizeof(int)));
   GPU_CHECK_CALL(gpuMalloc((void **)&s->res2, (size_t)NS * sizeof(double)));
@@ -613,17 +613,17 @@ static void gramChunk(GpuVectorStream *s, int k, CG_UINT r0, CG_UINT rows, void 
 }
 
 extern "C" void gpu_vstream_gram(
-    GpuVectorStream *s, const V_ELE *Ah, const V_ELE *Bh, int m, double *Gh)
+    GpuVectorStream *s, const V_ELE *Ah, const V_ELE *Bh, int m, V_ELE *Gh)
 {
   NVTX_RANGE_PUSH_C("gpu.vstream.gram", NVTX_C_RR);
   size_t mm = (size_t)m * (size_t)m;
   ensurePartial(s, (size_t)gramSubs(m) * mm);
-  GPU_CHECK_CALL(gpuMemsetAsync(s->G, 0, mm * sizeof(double), s->computeStream));
+  GPU_CHECK_CALL(gpuMemsetAsync(s->G, 0, mm * sizeof(V_ELE), s->computeStream));
   GramCtx c;
   c.m    = m;
   c.useB = (Bh != NULL && Bh != Ah);
   rowChunkPipeline(s, Ah, c.useB ? Bh : NULL, (CG_UINT)m, NULL, 0, gramChunk, &c);
-  GPU_CHECK_CALL(gpuMemcpy(Gh, s->G, mm * sizeof(double), gpuMemcpyDeviceToHost));
+  GPU_CHECK_CALL(gpuMemcpy(Gh, s->G, mm * sizeof(V_ELE), gpuMemcpyDeviceToHost));
   NVTX_RANGE_POP();
 }
 
@@ -643,11 +643,11 @@ static void updateChunk(GpuVectorStream *s, int k, CG_UINT r0, CG_UINT rows, voi
 }
 
 extern "C" void gpu_vstream_update(
-    GpuVectorStream *s, V_ELE *Yh, int m, const double *Bh, int mOut)
+    GpuVectorStream *s, V_ELE *Yh, int m, const V_ELE *Bh, int mOut)
 {
   NVTX_RANGE_PUSH_C("gpu.vstream.update", NVTX_C_ORTHO);
   GPU_CHECK_CALL(gpuMemcpy(
-      s->B, Bh, (size_t)m * (size_t)mOut * sizeof(double), gpuMemcpyHostToDevice));
+      s->B, Bh, (size_t)m * (size_t)mOut * sizeof(V_ELE), gpuMemcpyHostToDevice));
   UpdCtx c;
   c.m    = m;
   c.mOut = mOut;
@@ -684,7 +684,7 @@ extern "C" void gpu_vstream_ritzResiduals(GpuVectorStream *s,
     const V_ELE *AYh,
     int m,
     const double *eval,
-    const double *evec,
+    const V_ELE *evec,
     const int *sel,
     int nsel,
     double *res2)
@@ -697,7 +697,7 @@ extern "C" void gpu_vstream_ritzResiduals(GpuVectorStream *s,
   CG_UINT maxBlocks = (s->chunkRows + RES_ROWS - 1) / RES_ROWS;
   ensurePartial(s, (size_t)maxBlocks * (size_t)nsel);
   GPU_CHECK_CALL(gpuMemcpy(
-      s->B, evec, (size_t)m * (size_t)m * sizeof(double), gpuMemcpyHostToDevice));
+      s->B, evec, (size_t)m * (size_t)m * sizeof(V_ELE), gpuMemcpyHostToDevice));
   GPU_CHECK_CALL(gpuMemcpy(s->eval, eval, (size_t)m * sizeof(double), gpuMemcpyHostToDevice));
   GPU_CHECK_CALL(gpuMemcpy(s->sel, sel, (size_t)nsel * sizeof(int), gpuMemcpyHostToDevice));
   GPU_CHECK_CALL(gpuMemset(s->res2, 0, (size_t)nsel * sizeof(double)));
