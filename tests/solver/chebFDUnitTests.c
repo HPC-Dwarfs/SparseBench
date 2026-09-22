@@ -2,9 +2,11 @@
  * (src/chebFDSolver.c, src/chebFilter.c, src/denseJacobi.c), each checked
  * against an independent reference computation rather than against each
  * other, so a bug shared between the code under test and the reference
- * can't hide. ChebFD (v1) is real-symmetric only, so these tests are
- * skipped (trivially pass) under USE_COMPLEX, matching solveChebFD's own
- * runtime guard. */
+ * can't hide. All blocks and matrices use V_ELE storage: real builds
+ * exercise the real-symmetric path (phi = 0 fixtures), complex builds the
+ * complex-Hermitian path with genuinely complex off-diagonals (phi != 0).
+ * Eigenvectors are only ever checked through eigenvalues, residuals and
+ * orthonormality -- never entrywise (phase conventions). */
 #include "chebFDUnitTests.h"
 
 #include "../../src/allocate.h"
@@ -22,19 +24,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef USE_COMPLEX
-
-int chebFDUnitTests(int argc, char **argv)
-{
-  (void)argc;
-  (void)argv;
-  printf("Skipping ChebFD unit tests (USE_COMPLEX build; ChebFD v1 is "
-         "real-symmetric only).\n");
-  return 0;
-}
-
-#else
 
 /* ---- Section 1: chebFilterInit (src/chebFilter.c) --------------------- */
 
@@ -101,24 +90,43 @@ static int testChebFilterInit(void)
 
 /* ---- Section 2: jacobiEigen (src/denseJacobi.c) ------------------------ */
 
+/* ||A v - lambda v||_2 for column k of evec against row-major n x n A;
+ * the residual is accumulated as sum |d|^2 so it is real for both the
+ * real-symmetric and the complex-Hermitian path. */
+static double jacobiResidual(
+    const V_ELE *A, const V_ELE *evec, double lambda, int n, int k)
+{
+  V_ELE res2 = VCONST(0.0, 0.0);
+  for (int i = 0; i < n; i++) {
+    V_ELE avi = VCONST(0.0, 0.0);
+    for (int j = 0; j < n; j++) {
+      avi += A[i * n + j] * evec[j * n + (CG_UINT)k];
+    }
+    V_ELE d = avi - lambda * evec[i * n + (CG_UINT)k];
+    res2 += d * VCONJ(d);
+  }
+  return sqrt(VREAL(res2));
+}
+
 static int testJacobiEigen(void)
 {
   int ok = 1;
   printf("  jacobiEigen:\n");
 
   const int n = 6;
-  double Aref[36], Awork[36];
+  V_ELE Aref[36], Awork[36];
   memset(Aref, 0, sizeof(Aref));
   for (int i = 0; i < n; i++) {
-    Aref[i * n + i] = 2.0;
+    Aref[i * n + i] = VCONST(2.0, 0.0);
     if (i > 0) {
-      Aref[i * n + (i - 1)] = -1.0;
-      Aref[(i - 1) * n + i] = -1.0;
+      Aref[i * n + (i - 1)] = VCONST(-1.0, 0.0);
+      Aref[(i - 1) * n + i] = VCONST(-1.0, 0.0);
     }
   }
   memcpy(Awork, Aref, sizeof(Aref));
 
-  double eval[6], evec[36];
+  double eval[6];
+  V_ELE evec[36];
   jacobiEigen(Awork, n, eval, evec);
 
   for (int k = 1; k <= n; k++) {
@@ -131,22 +139,74 @@ static int testJacobiEigen(void)
         got,
         lambdaRef);
 
-    /* Residual check against the untouched copy: A*v - lambda*v ~ 0. */
-    double res2 = 0.0;
-    for (int i = 0; i < n; i++) {
-      double avi = 0.0;
-      for (int j = 0; j < n; j++) {
-        avi += Aref[i * n + j] * evec[j * n + (k - 1)];
-      }
-      double d = avi - got * evec[i * n + (k - 1)];
-      res2 += d * d;
-    }
-    CHECK(sqrt(res2) < 1e-8,
+    /* Residual check against the untouched copy. */
+    double res = jacobiResidual(Aref, evec, got, n, k - 1);
+    CHECK(res < 1e-8,
         "||A v_%d - lambda v_%d|| = %.3e too large",
         k - 1,
         k - 1,
-        sqrt(res2));
+        res);
   }
+
+#ifdef USE_COMPLEX
+  /* Complex Hermitian: the phase-gauged Laplacian with phi = pi/2, dense
+   * (every off-diagonal purely imaginary). The spectrum is phi-independent
+   * (tridiagEigenvalue); eigenvectors are checked via residuals and
+   * orthonormality only. */
+  double phi = M_PI / 2.0;
+  V_ELE Bref[36], Bwork[36];
+  for (int i = 0; i < n; i++) {
+    for (int j = 0; j < n; j++) {
+      V_ELE val = VCONST(0.0, 0.0);
+      if (i == j) {
+        val = VCONST(2.0, 0.0);
+      } else if (j == i + 1) {
+        val = VCONST(-cos(phi), sin(phi)); /* -e^{-i phi} */
+      } else if (j == i - 1) {
+        val = VCONST(-cos(phi), -sin(phi)); /* -e^{+i phi} */
+      }
+      Bref[i * n + j] = val;
+    }
+  }
+  memcpy(Bwork, Bref, sizeof(Bwork));
+
+  double beval[6];
+  V_ELE bevec[36];
+  jacobiEigen(Bwork, n, beval, bevec);
+
+  for (int k = 1; k <= n; k++) {
+    double lambdaRef;
+    tridiagEigenvalue(n, k, &lambdaRef);
+    CHECK(fabs(beval[k - 1] - lambdaRef) < 1e-9,
+        "complex eval[%d]=%.10g expected %.10g",
+        k - 1,
+        beval[k - 1],
+        lambdaRef);
+
+    double res = jacobiResidual(Bref, bevec, beval[k - 1], n, k - 1);
+    CHECK(res < 1e-8,
+        "complex ||A v_%d - lambda v_%d|| = %.3e too large",
+        k - 1,
+        k - 1,
+        res);
+  }
+
+  /* Complex eigenvectors must be orthonormal under the Hermitian dot. */
+  double ortho = 0.0;
+  for (int i = 0; i < n; i++) {
+    for (int j = i; j < n; j++) {
+      V_ELE dot = VCONST(0.0, 0.0);
+      for (int r = 0; r < n; r++) {
+        dot += VCONJ(bevec[r * n + (CG_UINT)i]) * bevec[r * n + (CG_UINT)j];
+      }
+      double d = VABS(dot - VCONST((i == j) ? 1.0 : 0.0, 0.0));
+      if (d > ortho) {
+        ortho = d;
+      }
+    }
+  }
+  CHECK(ortho < 1e-8, "complex eigenvector orthonormality residual %.3e", ortho);
+#endif /* USE_COMPLEX */
 
   printf(ok ? "    PASS\n" : "");
   return ok;
@@ -270,13 +330,18 @@ static int testApplyFilter(void)
   printf("  applyFilter:\n");
 
   const int n = 10;
+#ifdef USE_COMPLEX
+  const double phi = 1.0; /* genuinely complex off-diagonals */
+#else
+  const double phi = 0.0; /* plain real Laplacian */
+#endif
   Matrix A;
   GMatrix gm;
-  buildTridiagMatrix(&A, &gm, n, 1, 1);
+  buildPhaseTridiagMatrix(&A, &gm, n, 1, 1, phi);
   CG_UINT nr = A.nr;
 
   ChebFilter f;
-  double a = 0.0, b = 4.0; /* tridiag spectrum lies in (0,4) */
+  double a = 0.0, b = 4.0; /* spectrum lies in (0,4) for every phi */
   /* Target a window around one interior eigenvalue so the filter has real
    * shape to apply, without needing it to be sharp for this test. */
   double lamLo, lamHi;
@@ -289,21 +354,21 @@ static int testApplyFilter(void)
   ChebData d;
   allocChebData(&d, &A, n); /* NS = n so d.Y holds exactly the eigenbasis */
 
-  /* X = the exact (orthonormal) eigenbasis, column k-1 = v_k. Chebyshev
+  /* X = the exact (orthonormal) eigenbasis, column k-1 = u_k. Chebyshev
    * polynomials of A applied to an eigenvector reduce to a scalar multiple
-   * of the same eigenvector: p(A) v_k = p(lambda_k) v_k -- this is the
+   * of the same eigenvector: p(A) u_k = p(lambda_k) u_k -- this is the
    * independent ground truth applyFilter's block recurrence is checked
    * against. */
   for (CG_UINT r = 0; r < d.Y.nr; r++) {
     for (int k = 0; k < n; k++) {
-      d.Y.entries[r * (CG_UINT)n + (CG_UINT)k] = (V_ELE)0.0;
+      d.Y.entries[r * (CG_UINT)n + (CG_UINT)k] = VCONST(0.0, 0.0);
     }
   }
-  double *v = (double *)malloc((size_t)n * sizeof(double));
+  V_ELE *v = (V_ELE *)malloc((size_t)n * sizeof(V_ELE));
   for (int k = 1; k <= n; k++) {
-    tridiagEigenvector(n, k, v);
+    phaseTridiagEigenvector(n, k, phi, v);
     for (int j = 0; j < n; j++) {
-      d.Y.entries[(CG_UINT)j * (CG_UINT)n + (CG_UINT)(k - 1)] = (V_ELE)v[j];
+      d.Y.entries[(CG_UINT)j * (CG_UINT)n + (CG_UINT)(k - 1)] = v[j];
     }
   }
 
@@ -314,19 +379,18 @@ static int testApplyFilter(void)
     double lambdaK;
     tridiagEigenvalue(n, k, &lambdaK);
     double pLambda = evalChebFilterAt(&f, lambdaK);
-    tridiagEigenvector(n, k, v);
+    phaseTridiagEigenvector(n, k, phi, v);
 
-    double diff2 = 0.0;
+    V_ELE diff2 = VCONST(0.0, 0.0);
     for (int j = 0; j < n; j++) {
-      double got      = (double)d.Y.entries[(CG_UINT)j * (CG_UINT)n + (CG_UINT)(k - 1)];
-      double expected = pLambda * v[j];
-      double dd       = got - expected;
-      diff2 += dd * dd;
+      V_ELE got = d.Y.entries[(CG_UINT)j * (CG_UINT)n + (CG_UINT)(k - 1)];
+      V_ELE dd  = got - (V_ELE)pLambda * v[j];
+      diff2 += dd * VCONJ(dd);
     }
-    CHECK(sqrt(diff2) < 1e-6,
-        "column %d: ||Y[:,k] - p(lambda_k) v_k|| = %.3e too large",
+    CHECK(sqrt(VREAL(diff2)) < 1e-6,
+        "column %d: ||Y[:,k] - p(lambda_k) u_k|| = %.3e too large",
         k - 1,
-        sqrt(diff2));
+        sqrt(VREAL(diff2)));
   }
 
   free(v);
@@ -347,13 +411,13 @@ static double gramOffDiagMax(V_ELE *e, CG_UINT nr, int m)
   double maxOff = 0.0;
   for (int i = 0; i < m; i++) {
     for (int j = i; j < m; j++) {
-      double dot = 0.0;
+      V_ELE dot = VCONST(0.0, 0.0);
       for (CG_UINT r = 0; r < nr; r++) {
-        dot += (double)e[r * (CG_UINT)m + (CG_UINT)i] *
-               (double)e[r * (CG_UINT)m + (CG_UINT)j];
+        dot += VCONJ(e[r * (CG_UINT)m + (CG_UINT)i]) *
+               e[r * (CG_UINT)m + (CG_UINT)j];
       }
       double target = (i == j) ? 1.0 : 0.0;
-      double d      = fabs(dot - target);
+      double d      = VABS(dot - VCONST(target, 0.0));
       if (d > maxOff)
         maxOff = d;
     }
@@ -401,22 +465,27 @@ static int testRayleighRitzAndResidual(void)
   printf("  rayleighRitz / computeRitzResidual / residualNorm:\n");
 
   const int n = 8;
+#ifdef USE_COMPLEX
+  const double phi = 1.0;
+#else
+  const double phi = 0.0;
+#endif
   Matrix A;
   GMatrix gm;
-  buildTridiagMatrix(&A, &gm, n, 1, 1);
+  buildPhaseTridiagMatrix(&A, &gm, n, 1, 1, phi);
   CG_UINT nr = A.nr;
 
   ChebData d;
   allocChebData(&d, &A, n);
 
-  /* Y = the exact orthonormal eigenbasis -> H = Y^T A Y should come out
+  /* Y = the exact orthonormal eigenbasis -> H = Y^H A Y should come out
    * exactly diagonal (up to FP error), so rayleighRitz's Ritz values must
    * reproduce the closed-form eigenvalues and the residuals must vanish. */
-  double *v = (double *)malloc((size_t)n * sizeof(double));
+  V_ELE *v = (V_ELE *)malloc((size_t)n * sizeof(V_ELE));
   for (int k = 1; k <= n; k++) {
-    tridiagEigenvector(n, k, v);
+    phaseTridiagEigenvector(n, k, phi, v);
     for (int j = 0; j < n; j++) {
-      d.Y.entries[(CG_UINT)j * (CG_UINT)n + (CG_UINT)(k - 1)] = (V_ELE)v[j];
+      d.Y.entries[(CG_UINT)j * (CG_UINT)n + (CG_UINT)(k - 1)] = v[j];
     }
   }
   d.Y.nc = n;
@@ -455,11 +524,17 @@ static int testSolveChebFDEndToEnd(void)
   printf("  solveChebFD (end-to-end):\n");
 
   const int n = 40;
+#ifdef USE_COMPLEX
+  const double phi = 1.0; /* complex-Hermitian end-to-end run */
+#else
+  const double phi = 0.0;
+#endif
   Matrix A;
   GMatrix gm;
-  buildTridiagMatrix(&A, &gm, n, 1, 1);
+  buildPhaseTridiagMatrix(&A, &gm, n, 1, 1, phi);
 
-  /* Target a window around three consecutive interior eigenvalues. */
+  /* Target a window around three consecutive interior eigenvalues (the
+   * spectrum is phi-independent, so the same window serves both paths). */
   int kMid = n / 2;
   double lamLo, lamMid, lamHi;
   tridiagEigenvalue(n, kMid - 1, &lamLo);
@@ -522,5 +597,3 @@ int chebFDUnitTests(int argc, char **argv)
   printf("\nSummary: %d/%d ChebFD unit test sections passed.\n", passed, i);
   return (passed == i) ? 0 : 1;
 }
-
-#endif /* USE_COMPLEX */

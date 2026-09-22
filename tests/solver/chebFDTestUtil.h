@@ -98,6 +98,69 @@ static inline void buildTridiagMatrix(Matrix *A, GMatrix *gm, int n, int C, int 
   convertMatrix(A, gm);
 }
 
+static inline void fillPhaseTridiagGMatrix(GMatrix *gm, int n, double phi)
+{
+  V_ELE super = VCONST(-cos(phi), sin(phi));  /* -e^{-i phi}, col i+1 */
+  V_ELE sub   = VCONST(-cos(phi), -sin(phi)); /* -e^{+i phi}, col i-1 */
+
+  memset(gm, 0, sizeof(*gm));
+  gm->nr       = (CG_UINT)n;
+  gm->nc       = (CG_UINT)n;
+  gm->nnz      = (CG_UINT)(3 * n - 2);
+  gm->totalNr  = (CG_UINT)n;
+  gm->totalNnz = gm->nnz;
+  gm->startRow = 0;
+  gm->stopRow  = (CG_UINT)n;
+  gm->rowPtr   = (CG_UINT *)allocate(ARRAY_ALIGNMENT, (size_t)(n + 1) * sizeof(CG_UINT));
+  gm->entries  = (Entry *)allocate(ARRAY_ALIGNMENT, (size_t)gm->nnz * sizeof(Entry));
+
+  CG_UINT idx   = 0;
+  for (int i = 0; i < n; i++) {
+    gm->rowPtr[i] = idx;
+    if (i > 0) {
+      gm->entries[idx].col = (CG_UINT)(i - 1);
+      gm->entries[idx].val = sub;
+      idx++;
+    }
+    gm->entries[idx].col = (CG_UINT)i;
+    gm->entries[idx].val = VCONST(2.0, 0.0);
+    idx++;
+    if (i < n - 1) {
+      gm->entries[idx].col = (CG_UINT)(i + 1);
+      gm->entries[idx].val = super;
+      idx++;
+    }
+  }
+  gm->rowPtr[n] = idx;
+}
+
+static inline void buildPhaseTridiagMatrix(
+    Matrix *A, GMatrix *gm, int n, int C, int sigma, double phi)
+{
+  fillPhaseTridiagGMatrix(gm, n, phi);
+  memset(A, 0, sizeof(*A));
+#ifdef SCS
+  A->C     = (CG_UINT)C;
+  A->sigma = (CG_UINT)sigma;
+#else
+  (void)C;
+  (void)sigma;
+#endif
+  convertMatrix(A, gm);
+}
+
+/* Normalized u_k[j] = e^{i j phi} * sin((j+1) k pi/(n+1)) * sqrt(2/(n+1));
+ * the normalization uses sum_j sin^2(j k pi/(n+1)) = (n+1)/2 exactly. */
+static inline void phaseTridiagEigenvector(int n, int k, double phi, V_ELE *u)
+{
+  double inv = sqrt(2.0 / (double)(n + 1));
+  for (int j = 0; j < n; j++) {
+    double s    = sin((double)(j + 1) * (double)k * M_PI / (double)(n + 1)) * inv;
+    double arg  = (double)j * phi;
+    u[(CG_UINT)j] = VCONST(s * cos(arg), s * sin(arg));
+  }
+}
+
 /* Deterministic splitmix64-based fill, independent of randomInitBlock in
  * chebFDSolver.c (that one is not exposed, and the tests want their own
  * source of pseudo-random data anyway). */
@@ -110,7 +173,8 @@ static inline unsigned long long splitmix64Local(unsigned long long z)
 }
 
 /* Random fill of rows [0, nr), zero padding rows [nr, vecRows), of a
- * row-major vecRows x nc block. */
+ * row-major vecRows x nc block. Complex builds fill the imaginary part
+ * from an independent second hash stream (the real part keeps its values). */
 static inline void fillRandomBlock(
     V_ELE *e, CG_UINT vecRows, CG_UINT nr, int nc, unsigned long long seed)
 {
@@ -123,7 +187,18 @@ static inline void fillRandomBlock(
                             (unsigned long long)c * 0xff51afd7ed558ccdull);
         rv = (double)(h >> 11) / (double)(1ull << 53) * 2.0 - 1.0;
       }
+#ifdef USE_COMPLEX
+      double iv = 0.0;
+      if (r < nr) {
+        unsigned long long h2 =
+            splitmix64Local(seed ^ (r * 0x2545F4914F6CDD1Dull +
+                                 (unsigned long long)c * 0x9E3779B97F4A7C15ull));
+        iv = (double)(h2 >> 11) / (double)(1ull << 53) * 2.0 - 1.0;
+      }
+      e[r * (CG_UINT)nc + (CG_UINT)c] = VCONST(rv, iv);
+#else
       e[r * (CG_UINT)nc + (CG_UINT)c] = (V_ELE)rv;
+#endif
     }
   }
 }
@@ -132,7 +207,7 @@ static inline double maxAbsDiff(const V_ELE *a, const V_ELE *b, size_t sz)
 {
   double maxd = 0.0;
   for (size_t i = 0; i < sz; i++) {
-    maxd = fmax(maxd, fabs((double)(a[i] - b[i])));
+    maxd = fmax(maxd, VABS(a[i] - b[i]));
   }
   return maxd;
 }

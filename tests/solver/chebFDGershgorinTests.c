@@ -4,6 +4,7 @@
 #include "../../src/comm.h"
 #include "../../src/matrix.h"
 #include "../common.h"
+#include "chebFDTestUtil.h"
 
 #include <dirent.h>
 #include <float.h>
@@ -21,11 +22,11 @@ static void gershgorinRef(const GMatrix *g, double *a_out, double *b_out)
     double diag = 0.0;
     double off  = 0.0;
     for (CG_UINT j = g->rowPtr[i]; j < g->rowPtr[i + 1]; j++) {
-      double v = (double)g->entries[j].val;
+      V_ELE v = g->entries[j].val;
       if ((CG_UINT)g->entries[j].col == i) {
-        diag += v;
+        diag += VREAL(v);
       } else {
-        off += fabs(v);
+        off += VABS(v); // modulus; |Re(z)| only would under-estimate
       }
     }
     if (diag - off < lo)
@@ -187,6 +188,26 @@ int chebFDGershgorinTests(int argc, char **argv)
     freeMMMatrix(&mm);
   }
   closedir(dir);
+
+  // Constructed complex-Hermitian case
+  {
+    GMatrix gm;
+    fillPhaseTridiagGMatrix(&gm, 10, M_PI / 4.0);
+    int fails = checkMatrix(&gm, "phase-tridiag(phi=pi/4)", &comm, cfgs, nConfigs);
+    matrices++;
+    totalChecks += nConfigs;
+    passedChecks += nConfigs - fails;
+    if (fails > 0) {
+      failedMatrices++;
+    } else {
+      printf("  %-14s (%llux%llu)  all %d configs PASS\n",
+          "phase-tridiag",
+          (unsigned long long)gm.nr,
+          (unsigned long long)gm.nr,
+          nConfigs);
+    }
+    freeGMatrix(&gm);
+  }
 
   printf("\nSummary: %d/%d matrices fully passed, %d/%d configs passed.\n",
       matrices - failedMatrices,

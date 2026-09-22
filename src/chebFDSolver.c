@@ -60,9 +60,9 @@ void gershgorinBounds(CommType *comm, Matrix *A, double *a_out, double *b_out)
       for (CG_UINT j = 0; j < len; ++j) {
         CG_UINT idx = chunkOffset + j * C + k;
         if (colInd[idx] == newRow) {
-          diag += (double)val[idx];
+          diag += VREAL(val[idx]);
         } else {
-          off += fabs((double)val[idx]);
+          off += VABS(val[idx]); /* modulus of the complex entry */
         }
       }
       double rowLo = diag - off;
@@ -86,9 +86,9 @@ void gershgorinBounds(CommType *comm, Matrix *A, double *a_out, double *b_out)
     double off  = 0.0;
     for (CG_UINT j = rowPtr[i]; j < rowPtr[i + 1]; j++) {
       if (colInd[j] == i) {
-        diag += (double)val[j];
+        diag += VREAL(val[j]);
       } else {
-        off += fabs((double)val[j]);
+        off += VABS(val[j]); /* modulus of the complex entry */
       }
     }
     double rowLo = diag - off;
@@ -132,7 +132,16 @@ static void randomInitBlock(CommType *comm, CG_UINT nr, CG_UINT vecRows, V_ELE *
                                  (unsigned long long)k * 0xC2B2AE3D27D4EB4Full;
         unsigned long long h   = splitmix64(key);
         double rv              = (double)(h >> 11) / (double)(1ull << 53) * 2.0 - 1.0;
+#ifdef USE_COMPLEX
+        /* Independent second stream for the imaginary part: a real-only
+         * start block spans a coordinate subspace and can be orthogonal to
+         * the wanted eigenvectors of a complex problem. */
+        unsigned long long h2 = splitmix64(key ^ 0x2545F4914F6CDD1Dull);
+        double iv             = (double)(h2 >> 11) / (double)(1ull << 53) * 2.0 - 1.0;
+        e[r * (CG_UINT)nv + (CG_UINT)k] = VCONST(rv, iv);
+#else
         e[r * (CG_UINT)nv + (CG_UINT)k] = (V_ELE)rv;
+#endif
       }
     } else {
       for (int k = 0; k < nv; k++) {
@@ -245,7 +254,9 @@ int orthoMGS(CG_UINT nr, V_ELE *e, int nc, double tol)
       for (CG_UINT i = 0; i < nr; i++) {
         V_ELE ek = e[i * (CG_UINT)nc + (CG_UINT)k];
         for (int j = 0; j < m; j++) {
-          coefs[j] += ek * e[i * (CG_UINT)nc + (CG_UINT)j];
+          /* coefficient c_j = <e_j, e_k> = sum_i e_k[i] * conj(e_j[i]);
+           * the conjugate sits on the basis element, not on e_k */
+          coefs[j] += ek * VCONJ(e[i * (CG_UINT)nc + (CG_UINT)j]);
         }
       }
 #pragma omp parallel for schedule(OMP_SCHEDULE)
@@ -258,8 +269,8 @@ int orthoMGS(CG_UINT nr, V_ELE *e, int nc, double tol)
       }
     }
     V_ELE nrm2;
-    ddot_stride(nr, &e[k], nc, &e[k], nc, &nrm2);
-    double nrm = sqrt((double)nrm2);
+    ddot_stride(nr, &e[k], nc, &e[k], nc, &nrm2); /* <e_k, e_k>, real >= 0 */
+    double nrm = sqrt(VREAL(nrm2));
     if (nrm < tol) {
       continue; /* linearly dependent -> drop */
     }
@@ -351,18 +362,19 @@ void rayleighRitz(Matrix *A,
 }
 
 /* H = Y^H AY for two nr x m row-major blocks; both triangles written from
- * one accumulator so H is exactly Hermitian, as jacobiEigen assumes. */
+ * one accumulator so H is exactly Hermitian, as jacobiEigen assumes.
+ * Column i of H is <y_i, A y_j> = sum_r conj(Y[r,i]) * AY[r,j]. */
 void gramYtAY(CG_UINT nr, int m, const V_ELE *Ye, const V_ELE *AYe, V_ELE *H)
 {
 #pragma omp parallel for schedule(OMP_SCHEDULE)
   for (int i = 0; i < m; i++) {
     for (int j = i; j < m; j++) {
-      double hv = 0.0;
+      V_ELE hv = VCONST(0.0, 0.0);
       for (CG_UINT r = 0; r < nr; r++) {
-        hv += (double)Ye[r * (CG_UINT)m + i] * (double)AYe[r * (CG_UINT)m + j];
+        hv += VCONJ(Ye[r * (CG_UINT)m + i]) * AYe[r * (CG_UINT)m + j];
       }
       H[i * m + j] = hv;
-      H[j * m + i] = hv;
+      H[j * m + i] = VCONJ(hv);
     }
   }
 }
@@ -386,22 +398,22 @@ void computeRitzResidual(DMatrix *Y,
   }
 #pragma omp parallel for schedule(OMP_SCHEDULE)
   for (CG_UINT r = 0; r < nr; r++) {
-    double vv = 0.0, av = 0.0;
+    V_ELE vv = VCONST(0.0, 0.0), av = VCONST(0.0, 0.0);
     for (int j = 0; j < m; j++) {
-      vv += evk[j] * (double)Ye[r * (CG_UINT)m + j];
-      av += evk[j] * (double)AYe[r * (CG_UINT)m + j];
+      vv += evk[j] * Ye[r * (CG_UINT)m + j];
+      av += evk[j] * AYe[r * (CG_UINT)m + j];
     }
-    avbuf[r] = (V_ELE)(av - evalk * vv);
+    avbuf[r] = av - evalk * vv;
   }
 }
 
-/* Step 8: 2-norm of a residual vector, ||avbuf||₂ = sqrt(avbufᵀ avbuf). */
+/* Step 8: 2-norm of a residual vector, ||avbuf||₂ = sqrt(avbufᴴ avbuf). */
 double residualNorm(CG_UINT nr, V_ELE *avbuf)
 {
   V_ELE res2;
   /* Dispatched: a host dot would fault avbuf back per Ritz pair. */
-  DDOTFUNC(nr, avbuf, avbuf, &res2);
-  return sqrt((double)res2);
+  DDOTFUNC(nr, avbuf, avbuf, &res2); /* conjugated dot -> real >= 0 */
+  return sqrt(VREAL(res2));
 }
 
 // Up-front sanity checks for solveChebFD:
@@ -472,14 +484,6 @@ static int verify_params(CommType *comm, Parameter *param, const Matrix *A)
 
 int solveChebFD(CommType *comm, Parameter *param, Matrix *A)
 {
-#ifdef USE_COMPLEX
-  if (commIsMaster(comm)) {
-    printf("ChebFD (v1) supports real-symmetric matrices only "
-           "(rebuild without USE_COMPLEX).\n");
-  }
-  return -1;
-#endif
-
   if (verify_params(comm, param, A) != 0) {
     return -1;
   }
