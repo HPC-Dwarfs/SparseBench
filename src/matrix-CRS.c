@@ -15,7 +15,6 @@
 #define OMP_PARFOR
 #endif
 
-
 void convertMatrix(Matrix *sm, GMatrix *m)
 {
   sm->startRow    = m->startRow;
@@ -75,7 +74,7 @@ void spMVM(Matrix *m, const V_ELE *restrict x, V_ELE *restrict y)
   CG_UINT numRows = m->nr;
   CG_UINT *rowPtr = m->rowPtr;
 
-OMP_PARFOR
+  OMP_PARFOR
   for (CG_UINT i = 0; i < numRows; i++) {
     V_ELE sum = 0.0;
 
@@ -119,7 +118,7 @@ void spMVM_local_range(const Matrix *m,
   CG_UINT *rowPtr      = m->rowPtr;
   CG_UINT *rowLocalEnd = m->rowLocalEnd;
 
-OMP_PARFOR
+  OMP_PARFOR
   for (CG_UINT i = rowStart; i < rowEnd; i++) {
     V_ELE sum = 0.0;
 
@@ -170,7 +169,7 @@ void spMVM_external(const Matrix *m, const V_ELE *restrict x, V_ELE *restrict y)
   CG_UINT *boundaryRows = m->boundaryRows;
   CG_UINT nBoundaryRows = m->nBoundaryRows;
 
-OMP_PARFOR
+  OMP_PARFOR
   for (CG_UINT r = 0; r < nBoundaryRows; r++) {
     CG_UINT i = boundaryRows[r];
     V_ELE sum = 0.0;
@@ -192,7 +191,7 @@ void spMMVM(Matrix *m, const DMatrix *x, DMatrix *y)
   CG_UINT numRows = m->nr;
   CG_UINT *rowPtr = m->rowPtr;
 
-OMP_PARFOR
+  OMP_PARFOR
   for (CG_UINT row = 0; row < numRows; row++) {
     V_ELE *y_row = &y->entries[row * y->nc];
 

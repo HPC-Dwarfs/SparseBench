@@ -151,7 +151,7 @@ int main(int argc, char **argv)
   int numSeq = 0;
   int *seq   = NULL;
 
-  int k = 0;
+  int k      = 0;
   /* Storage for the profiler region sequences at function scope: seq is
    * handed to profilerPrint() after the switch, so pointing it at arrays
    * declared inside the switch would dangle (stack-use-after-scope). */
@@ -194,8 +194,8 @@ int main(int argc, char **argv)
 #ifdef SCS
     yLen = sm.nrPadded;
 #endif
-    V_ELE *x          = (V_ELE *)allocate(ARRAY_ALIGNMENT, m.nc * sizeof(V_ELE));
-    V_ELE *y          = (V_ELE *)allocate(ARRAY_ALIGNMENT, yLen * sizeof(V_ELE));
+    V_ELE *x = (V_ELE *)allocate(ARRAY_ALIGNMENT, m.nc * sizeof(V_ELE));
+    V_ELE *y = (V_ELE *)allocate(ARRAY_ALIGNMENT, yLen * sizeof(V_ELE));
 
     /* Initialize the whole extended vector: after localization x holds
      * m.nc entries (locals + externals). Only touching m.nr of them leaves
@@ -227,12 +227,12 @@ int main(int argc, char **argv)
     /* SCS writes the padded rows of y as well (nrPadded >= nr). */
     CG_UINT yRows = sm.nr;
 #ifdef SCS
-    yRows         = sm.nrPadded;
+    yRows = sm.nrPadded;
 #endif
-    DMatrix x   = { .nr = sm.nc, .nc = param.blockwidth, .entries = NULL };
-    DMatrix y   = { .nr = yRows, .nc = param.blockwidth, .entries = NULL };
-    x.entries   = (V_ELE *)allocate(ARRAY_ALIGNMENT, x.nr * x.nc * sizeof(V_ELE));
-    y.entries   = (V_ELE *)allocate(ARRAY_ALIGNMENT, y.nr * y.nc * sizeof(V_ELE));
+    DMatrix x = { .nr = sm.nc, .nc = param.blockwidth, .entries = NULL };
+    DMatrix y = { .nr = yRows, .nc = param.blockwidth, .entries = NULL };
+    x.entries = (V_ELE *)allocate(ARRAY_ALIGNMENT, x.nr * x.nc * sizeof(V_ELE));
+    y.entries = (V_ELE *)allocate(ARRAY_ALIGNMENT, y.nr * y.nc * sizeof(V_ELE));
 
     for (CG_UINT i = 0; i < x.nr * x.nc; i++) {
       x.entries[i] = 1.0;

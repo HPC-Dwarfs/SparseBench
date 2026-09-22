@@ -17,16 +17,16 @@
 
 void convertMatrix(Matrix *sm, GMatrix *m)
 {
-  sm->startRow = m->startRow;
-  sm->stopRow  = m->stopRow;
-  sm->totalNr  = m->totalNr;
-  sm->totalNnz = m->totalNnz;
-  sm->nr       = m->nr;
-  sm->nc       = m->nc;
-  sm->nnz      = m->nnz;
+  sm->startRow    = m->startRow;
+  sm->stopRow     = m->stopRow;
+  sm->totalNr     = m->totalNr;
+  sm->totalNnz    = m->totalNnz;
+  sm->nr          = m->nr;
+  sm->nc          = m->nc;
+  sm->nnz         = m->nnz;
 
-  sm->rowPtr  = (CG_UINT *)allocate(ARRAY_ALIGNMENT, (m->nr + 1) * sizeof(CG_UINT));
-  sm->entries = (mEntry *)allocate(ARRAY_ALIGNMENT, m->nnz * sizeof(mEntry));
+  sm->rowPtr      = (CG_UINT *)allocate(ARRAY_ALIGNMENT, (m->nr + 1) * sizeof(CG_UINT));
+  sm->entries     = (mEntry *)allocate(ARRAY_ALIGNMENT, m->nnz * sizeof(mEntry));
 
   Entry *entries  = m->entries;
   CG_UINT numRows = m->nr;
@@ -49,7 +49,7 @@ void spMVM(Matrix *m, const V_ELE *restrict x, V_ELE *restrict y)
   CG_UINT *rowPtr = m->rowPtr;
   mEntry *entries = m->entries;
 
-OMP_PARFOR
+  OMP_PARFOR
   for (CG_UINT i = 0; i < numRows; i++) {
     V_ELE sum = 0.0;
 
@@ -68,7 +68,7 @@ void spMMVM(Matrix *m, const DMatrix *x, DMatrix *y)
   CG_UINT *rowPtr = m->rowPtr;
   mEntry *entries = m->entries;
 
-OMP_PARFOR
+  OMP_PARFOR
   for (CG_UINT row = 0; row < numRows; row++) {
     V_ELE *y_row = &y->entries[row * y->nc];
 
@@ -78,9 +78,9 @@ OMP_PARFOR
 
     /* loop over all elements in row and accumulate the scaled x[col] row */
     for (CG_UINT j = rowPtr[row]; j < rowPtr[row + 1]; j++) {
-      CG_UINT col       = entries[j].col;
+      CG_UINT col  = entries[j].col;
       V_ELE *x_col = &x->entries[col * x->nc];
-      V_ELE a           = entries[j].val;
+      V_ELE a      = entries[j].val;
       for (size_t c = 0; c < x->nc; c++)
         y_row[c] += a * x_col[c];
     }
