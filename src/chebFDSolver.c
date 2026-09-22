@@ -295,9 +295,9 @@ int chebOrthoCholQR2(GpuVectorStream *vs,
     V_ELE *Y,
     int nc,
     double tol,
-    double *G,
+    V_ELE *G,
     double *eval,
-    double *evec,
+    V_ELE *evec,
     int passes)
 {
   int m = nc;
@@ -315,13 +315,14 @@ int chebOrthoCholQR2(GpuVectorStream *vs,
     if (mNew == 0) {
       return 0;
     }
-    /* B (m x mNew, row-major) = kept eigenvectors scaled by lambda^-1/2.
-     * G is no longer needed and is at least m*m: reuse it for B. */
-    double *B = G;
+    /* B (m x mNew, row-major) = kept eigenvectors scaled by lambda^-1/2
+     * (the Loewdin scaling is real even for complex G). G is no longer
+     * needed and is at least m*m: reuse it for B. */
+    V_ELE *B = G;
     for (int j = j0; j < m; j++) {
       double inv = 1.0 / sqrt(eval[j]);
       for (int i = 0; i < m; i++) {
-        B[(size_t)i * mNew + (j - j0)] = evec[(size_t)i * m + j] * inv;
+        B[(size_t)i * mNew + (j - j0)] = evec[(size_t)i * m + j] * (V_ELE)inv;
       }
     }
     gpu_vstream_update(vs, Y, m, B, mNew);
@@ -339,9 +340,9 @@ void rayleighRitz(Matrix *A,
     DMatrix *AY,
     int m,
     CG_UINT nr,
-    double *H,
+    V_ELE *H,
     double *eval,
-    double *evec)
+    V_ELE *evec)
 {
   AY->nc = m;
   SPMMVMFUNC(A, Y, AY);
@@ -349,9 +350,9 @@ void rayleighRitz(Matrix *A,
   jacobiEigen(H, m, eval, evec);
 }
 
-/* H = Y^T AY for two nr x m row-major blocks; both triangles written from
- * one accumulator so H is exactly symmetric, as jacobiEigen assumes. */
-void gramYtAY(CG_UINT nr, int m, const V_ELE *Ye, const V_ELE *AYe, double *H)
+/* H = Y^H AY for two nr x m row-major blocks; both triangles written from
+ * one accumulator so H is exactly Hermitian, as jacobiEigen assumes. */
+void gramYtAY(CG_UINT nr, int m, const V_ELE *Ye, const V_ELE *AYe, V_ELE *H)
 {
 #pragma omp parallel for schedule(OMP_SCHEDULE)
   for (int i = 0; i < m; i++) {
@@ -373,9 +374,9 @@ void computeRitzResidual(DMatrix *Y,
     int m,
     CG_UINT nr,
     double evalk,
-    double *evec,
+    V_ELE *evec,
     int k,
-    double *evk,
+    V_ELE *evk,
     V_ELE *avbuf)
 {
   V_ELE *Ye  = Y->entries;
@@ -532,10 +533,10 @@ int solveChebFD(CommType *comm, Parameter *param, Matrix *A)
   DMatrix *u      = &d.u;
   DMatrix *w      = &d.w;
   V_ELE *avbuf    = d.avbuf;
-  double *evk     = d.evk;
-  double *H       = d.H;
+  V_ELE *evk      = d.evk;
+  V_ELE *H        = d.H;
   double *eval    = d.eval;
-  double *evec    = d.evec;
+  V_ELE *evec     = d.evec;
   double *accEval = d.accEval;
   int *sel        = d.sel;
   double *res2    = d.res2;
@@ -878,11 +879,11 @@ void allocChebData(ChebData *d, Matrix *m, int NS)
   /* avbuf is written by the Ritz residual kernel and consumed by ddot on
    * the host path; the dense arrays below are host-read (jacobiEigen). */
   d->avbuf   = (V_ELE *)allocateDevice((size_t)nr * sizeof(V_ELE));
-  d->evk     = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * sizeof(double));
+  d->evk     = (V_ELE *)allocate(ARRAY_ALIGNMENT, (size_t)NS * sizeof(V_ELE));
 
-  d->H       = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(double));
+  d->H       = (V_ELE *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(V_ELE));
   d->eval    = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * sizeof(double));
-  d->evec    = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(double));
+  d->evec    = (V_ELE *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(V_ELE));
   d->accEval = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * sizeof(double));
   d->sel     = (int *)allocate(ARRAY_ALIGNMENT, (size_t)NS * sizeof(int));
   d->res2    = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * sizeof(double));

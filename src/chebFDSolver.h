@@ -33,9 +33,9 @@ extern int chebOrthoCholQR2(struct GpuVectorStream *vs,
     V_ELE *Y,
     int nc,
     double tol,
-    double *G,
+    V_ELE *G,
     double *eval,
-    double *evec,
+    V_ELE *evec,
     int passes);
 #endif
 
@@ -43,19 +43,19 @@ extern int chebOrthoCholQR2(struct GpuVectorStream *vs,
 // accepted rank m <= nc and compacts/repacks columns in place.
 extern int orthoMGS(CG_UINT nr, V_ELE *e, int nc, double tol);
 
-// Step 7 (inner): H = Y^T AY, written exactly symmetric; shared by the
+// Step 7 (inner): H = Y^H AY, written exactly Hermitian; shared by the
 // host and device paths (see kernel_dispatch.h).
-extern void gramYtAY(CG_UINT nr, int m, const V_ELE *Ye, const V_ELE *AYe, double *H);
+extern void gramYtAY(CG_UINT nr, int m, const V_ELE *Ye, const V_ELE *AYe, V_ELE *H);
 
-// Step 7: Rayleigh-Ritz projection H = Y^T A Y (m x m) and its eigenpairs.
+// Step 7: Rayleigh-Ritz projection H = Y^H A Y (m x m) and its eigenpairs.
 extern void rayleighRitz(Matrix *A,
     DMatrix *Y,
     DMatrix *AY,
     int m,
     CG_UINT nr,
-    double *H,
+    V_ELE *H,
     double *eval,
-    double *evec);
+    V_ELE *evec);
 
 // Step 8: residual avbuf = AY*evec[:,k] - evalk*(Y*evec[:,k]); evk is
 // length-m scratch.
@@ -64,9 +64,9 @@ extern void computeRitzResidual(DMatrix *Y,
     int m,
     CG_UINT nr,
     double evalk,
-    double *evec,
+    V_ELE *evec,
     int k,
-    double *evk,
+    V_ELE *evk,
     V_ELE *avbuf);
 
 // Step 8: 2-norm of a length-nr residual vector.
@@ -83,10 +83,10 @@ typedef struct {
   DMatrix u;    // block scratch (host recurrence)
   DMatrix w;    // block scratch (host recurrence)
   V_ELE *avbuf; // residual of a single Ritz pair (nr)
-  double *evk;  // contiguous gather of one eigenvector column of evec (NS)
-  double *H;
+  V_ELE *evk;   // contiguous gather of one eigenvector column of evec (NS)
+  V_ELE *H;     // Rayleigh-Ritz projection (NS x NS, Hermitian)
   double *eval;
-  double *evec;
+  V_ELE *evec;     // Ritz vectors (NS x NS, as produced by jacobiEigen)
   double *accEval; // accepted (converged) in-interval eigenvalues (NS)
   int *sel;        // in-interval Ritz pair indices of the current iteration (NS)
   double *res2;    // their squared residual norms (NS)
