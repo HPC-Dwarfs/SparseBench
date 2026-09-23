@@ -1,0 +1,25 @@
+ScamacErrorCode scamac_matrix_Membrane1_check(const scamac_matrix_Membrane1_params_st * par, char ** desc) {
+  if (!par)  { return scamac_error_set_par(SCAMAC_ENULL,1); }
+  ScamacErrorCode err = SCAMAC_EOK;
+  scamac_string_st str;
+  if (desc) { scamac_string_empty(&str); }
+  assert((par->pack== option_tight) || (par->pack== option_loose));
+  if (!((par->lx)  > 0)) {
+    err=SCAMAC_EINVALID;
+    if (desc) { scamac_string_append(&str,"[Parameter range] lx  > 0\n"); }
+  }
+  if (!((par->ly)  > 0)) {
+    err=SCAMAC_EINVALID;
+    if (desc) { scamac_string_append(&str,"[Parameter range] ly  > 0\n"); }
+  }
+  if (!((par->nx)  > 0)) {
+    err=SCAMAC_EINVALID;
+    if (desc) { scamac_string_append(&str,"[Parameter range] nx  > 0\n"); }
+  }
+  if (!((par->ny)  > 0)) {
+    err=SCAMAC_EINVALID;
+    if (desc) { scamac_string_append(&str,"[Parameter range] ny  > 0\n"); }
+  }
+  if (desc) { *desc = scamac_string_get(&str); }
+  return err;
+  }

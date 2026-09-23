@@ -2,7 +2,18 @@
 TOOLCHAIN ?= CLANG
 # Supported CRS, SCS, CCRS
 MTX_FMT ?= CRS
+# Enable LIKWID instrumentation (true or false)
+ENABLE_LIKWID ?= false
+# Enable NVTX range markers for nsys/ncu timelines (TOOLCHAIN=NVCC only)
+ENABLE_NVTX ?= false
+# Enable section timing (events + host wall on GPU, getTimeStamp on CPU).
+# solveChebFD's step/throughput reporting flows through it — disable only
+# to measure the timer's own (negligible) overhead.
+ENABLE_SECTIMER ?= true
+# Enable MPI parallelization (true or false)
 ENABLE_MPI ?= false
+# Enable OpenMP shared memory parallelization (true or false)
+# Can be combined with MPI
 ENABLE_OPENMP ?= false
 # Overlap the CG halo exchange with the local part of the SpMV (true or false).
 # Only takes effect for the CPU CRS backend with MPI enabled.
@@ -18,12 +29,18 @@ USE_COMPLEX_ELEMENTS ?= false
 SELL_CHUNK_VALUE ?= 64
 SELL_SIGMA_VALUE ?= 64
 NUM_VEC ?= 10
+# Schedule used by every #pragma omp parallel for in src/. Override at build
+# time with `make OMP_SCHEDULE=...`.  Keep `static` for NUMA first-touch
+# correctness — dynamic/guided break the requirement that init loops touch
+# the same pages the kernels later read.
+OMP_SCHEDULE ?= static
 # GPU architecture (only used when TOOLCHAIN=NVCC or HIP)
 # # NVCC: 
 #       -gencode=arch=compute_80,code=sm_80 # for A100
 #       -gencode=arch=compute_86,code=sm_86 # for A40
 #       -gencode=arch=compute_90,code=sm_90 # for GH200
-CUDA_ARCH ?= -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_86,code=sm_86 -gencode=arch=compute_90,code=sm_90
+#       -gencode=arch=compute_90,code=compute_90 # PTX fallback: JIT on newer sm_9x+ GPUs
+CUDA_ARCH ?= -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_86,code=sm_86 -gencode=arch=compute_90,code=sm_90 -gencode=arch=compute_90,code=compute_90
 # # HIP:  
 #       gfx908 # for MI100
 #       gfx90a # for MI210A
@@ -32,8 +49,7 @@ CUDA_ARCH ?= -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_86,code=s
 HIP_ARCH  ?= gfx1030,gfx942
 #Feature options
 OPTIONS +=  -DARRAY_ALIGNMENT=64
-OPTIONS +=  -DOMP_SCHEDULE=static
-OPTIONS +=  -DOVERLAP_NUDGE_CHUNKS=$(OVERLAP_NUDGE_CHUNKS)
+OPTIONS +=  -DOMP_SCHEDULE=$(OMP_SCHEDULE)
 #OPTIONS +=  -DVERBOSE
 #OPTIONS +=  -DVERBOSE_AFFINITY
 #OPTIONS +=  -DVERBOSE_DATASIZE

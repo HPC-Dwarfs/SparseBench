@@ -25,6 +25,7 @@ $(error Stopping after creating config.mk - please review and run make again)
 endif
 include config.mk
 include $(MAKE_DIR)/include_$(TOOLCHAIN).mk
+include $(MAKE_DIR)/include_SCAMAC.mk
 INCLUDES  += -I$(SRC_DIR) -I$(BUILD_DIR)
 
 VPATH     = $(SRC_DIR)
@@ -55,9 +56,13 @@ endef
 # $(BUILD_DIR) is order-only: the flags stamp creates/removes a temp file in
 # it on every run, which would otherwise make the directory look 'newer' and
 # cause a pointless relink on alternating invocations.
-$(TARGET):  $(BUILD_DIR) | .clangd $(ALL_OBJ)
+$(TARGET):  $(BUILD_DIR) $(SCAMAC_LIB) | .clangd $(ALL_OBJ)
 	$(info ===>  LINKING  $(TARGET))
 	$(Q)${LD} ${LFLAGS} -o $(TARGET) $(ALL_OBJ) $(LIBS)
+
+$(SCAMAC_LIB): $(SCAMAC_SRC) $(MAKE_DIR)/include_$(TOOLCHAIN).mk config.mk
+	$(info ===>  BUILD  $(SCAMAC_LIB))
+	$(Q)$(MAKE) --no-print-directory -C $(SCAMAC_DIR)
 
 $(BUILD_DIR)/%.o:  %.c $(MAKE_DIR)/include_$(TOOLCHAIN).mk config.mk $(FLAGS_STAMP)
 	$(info ===>  COMPILE  $@)
@@ -77,10 +82,12 @@ $(BUILD_DIR)/%.s:  %.c
 clean:
 	$(info ===>  CLEAN)
 	@rm -rf $(BUILD_DIR)
+	@$(MAKE) --no-print-directory -C $(SCAMAC_DIR) clean
 
 distclean:
 	$(info ===>  DIST CLEAN)
 	@rm -rf build
+	@$(MAKE) --no-print-directory -C $(SCAMAC_DIR) distclean
 	@rm -f sparseBench-*
 	@rm -f compile_commands.json
 	@rm -f tags .clangd out*
