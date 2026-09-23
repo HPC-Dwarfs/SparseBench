@@ -15,18 +15,32 @@
 #define OMP_PARFOR
 #endif
 
+/* Allocate every format-specific array of m in one place. Assumes the size
+ * scalars (nr, nnz) are already set on m. Pairs with freeMatrix. */
+void allocMatrix(Matrix *m)
+{
+  m->rowPtr  = (CG_UINT *)allocate(ARRAY_ALIGNMENT, (m->nr + 1) * sizeof(CG_UINT));
+  m->entries = (mEntry *)allocate(ARRAY_ALIGNMENT, m->nnz * sizeof(mEntry));
+}
+
+/* Free the arrays allocated by allocMatrix. */
+void freeMatrix(Matrix *m)
+{
+  deallocate(m->rowPtr);
+  deallocate(m->entries);
+}
+
 void convertMatrix(Matrix *sm, GMatrix *m)
 {
-  sm->startRow    = m->startRow;
-  sm->stopRow     = m->stopRow;
-  sm->totalNr     = m->totalNr;
-  sm->totalNnz    = m->totalNnz;
-  sm->nr          = m->nr;
-  sm->nc          = m->nc;
-  sm->nnz         = m->nnz;
+  sm->startRow = m->startRow;
+  sm->stopRow  = m->stopRow;
+  sm->totalNr  = m->totalNr;
+  sm->totalNnz = m->totalNnz;
+  sm->nr       = m->nr;
+  sm->nc       = m->nc;
+  sm->nnz      = m->nnz;
 
-  sm->rowPtr      = (CG_UINT *)allocate(ARRAY_ALIGNMENT, (m->nr + 1) * sizeof(CG_UINT));
-  sm->entries     = (mEntry *)allocate(ARRAY_ALIGNMENT, m->nnz * sizeof(mEntry));
+  allocMatrix(sm);
 
   Entry *entries  = m->entries;
   CG_UINT numRows = m->nr;
@@ -83,6 +97,92 @@ void spMMVM(Matrix *m, const DMatrix *x, DMatrix *y)
       V_ELE a      = entries[j].val;
       for (size_t c = 0; c < x->nc; c++)
         y_row[c] += a * x_col[c];
+    }
+  }
+}
+
+/* Fused y = cA*(m*x) + cP*p + cQ*q, evaluated per row without ever writing
+ * m*x out to memory. q may be NULL (with cQ ignored). */
+void spMMVMFused(Matrix *m,
+    const DMatrix *x,
+    V_ELE cA,
+    const DMatrix *p,
+    V_ELE cP,
+    const DMatrix *q,
+    V_ELE cQ,
+    DMatrix *y)
+{
+  CG_UINT numRows = m->nr;
+  CG_UINT *rowPtr = m->rowPtr;
+  mEntry *entries = m->entries;
+  CG_UINT nc      = x->nc;
+
+  OMP_PARFOR
+  for (CG_UINT row = 0; row < numRows; row++) {
+    V_ELE acc[nc];
+    for (size_t c = 0; c < nc; c++)
+      acc[c] = 0.0;
+
+    for (CG_UINT j = rowPtr[row]; j < rowPtr[row + 1]; j++) {
+      V_ELE *x_col = &x->entries[entries[j].col * nc];
+      V_ELE a      = entries[j].val;
+      for (size_t c = 0; c < nc; c++)
+        acc[c] += a * x_col[c];
+    }
+
+    V_ELE *y_row = &y->entries[row * nc];
+    V_ELE *p_row = &p->entries[row * nc];
+    if (q != NULL) {
+      V_ELE *q_row = &q->entries[row * nc];
+      for (size_t c = 0; c < nc; c++)
+        y_row[c] = cA * acc[c] + cP * p_row[c] + cQ * q_row[c];
+    } else {
+      for (size_t c = 0; c < nc; c++)
+        y_row[c] = cA * acc[c] + cP * p_row[c];
+    }
+  }
+}
+
+/* ChebFD recurrence step: y = cA*(m*w) + cP*w + cQ*q, fused with the
+ * accumulate x += gc*y in the same row pass. See matrix-CRS.c. */
+void chebfdOp(Matrix *m,
+    const DMatrix *w,
+    V_ELE cA,
+    V_ELE cP,
+    const DMatrix *q,
+    V_ELE cQ,
+    DMatrix *y,
+    V_ELE gc,
+    DMatrix *x)
+{
+  CG_UINT numRows = m->nr;
+  CG_UINT *rowPtr = m->rowPtr;
+  mEntry *entries = m->entries;
+  CG_UINT nc      = w->nc;
+
+  OMP_PARFOR
+  for (CG_UINT row = 0; row < numRows; row++) {
+    V_ELE acc[nc];
+    for (size_t c = 0; c < nc; c++)
+      acc[c] = 0.0;
+
+    for (CG_UINT j = rowPtr[row]; j < rowPtr[row + 1]; j++) {
+      V_ELE *w_col = &w->entries[entries[j].col * nc];
+      V_ELE a      = entries[j].val;
+      for (size_t c = 0; c < nc; c++)
+        acc[c] += a * w_col[c];
+    }
+
+    V_ELE *w_row = &w->entries[row * nc];
+    V_ELE *y_row = &y->entries[row * nc];
+    V_ELE *x_row = &x->entries[row * nc];
+    for (size_t c = 0; c < nc; c++) {
+      V_ELE t = cA * acc[c] + cP * w_row[c];
+      if (q != NULL) {
+        t += cQ * q->entries[row * nc + c];
+      }
+      y_row[c] = t;
+      x_row[c] += gc * t;
     }
   }
 }

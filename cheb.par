@@ -1,0 +1,16 @@
+# ChebFD param file test
+filename generate7P
+nx 6
+ny 6
+nz 6
+cheb_lam_lo 25
+cheb_lam_hi 32
+cheb_Np 150
+cheb_NS 2000
+eps 1e-6
+itermax 30
+# GPU build: the matrix is managed memory, prefetched to the device once;
+# the search-space blocks live in pinned host memory and are streamed
+# through the device in column sub-blocks of cheb_nb columns (0 = 16).
+# gpu_alloc is ignored by ChebFD.
+# cheb_nb 0

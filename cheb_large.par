@@ -1,0 +1,11 @@
+filename scamac:Anderson,Lx=100,Ly=100,Lz=100,ranpot=2.5
+# ChebFD larger profile-run param file (for nsys timeline generation)
+cheb_lam_lo -6
+cheb_lam_hi 6
+cheb_Np 150
+cheb_NS 64
+eps 1e-6
+itermax 10
+# GPU build: matrix managed + prefetched, search space streamed from pinned
+# host memory in sub-blocks of cheb_nb columns (0 = 16)
+cheb_nb 16

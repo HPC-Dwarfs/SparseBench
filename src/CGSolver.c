@@ -11,14 +11,12 @@
 
 #include "allocate.h"
 #include "comm.h"
+#include "cuda/kernel_dispatch.h"
+#include "cuda/nvtx_marker.h"
 #include "profiler.h"
 #include "solver.h"
 #include "timing.h"
 #include "vtype.h"
-
-#if defined(RUNTIME_BACKEND_IS_CUDA) || defined(RUNTIME_BACKEND_IS_HIP)
-#include "cuda/cuda_kernels.h"
-#endif
 
 static void initVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
 {
@@ -26,6 +24,9 @@ static void initVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
   CG_UINT numRows = m->nr;
   CG_UINT *rowPtr = m->rowPtr;
 
+  // Parallel init for NUMA first-touch — must use the same schedule the
+  // kernels use (OMP_SCHEDULE, kept as static for first-touch correctness).
+#pragma omp parallel for schedule(OMP_SCHEDULE)
   for (CG_UINT rowID = 0; rowID < numRows; rowID++) {
 
     CG_UINT nnzrow = rowPtr[rowID + 1] - rowPtr[rowID];
@@ -47,6 +48,8 @@ static void initVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
   V_ELE *val            = m->val;
   CG_UINT *oldToNewPerm = m->oldToNewPerm;
 
+  // Parallel init for NUMA first-touch — see CRS branch above.
+#pragma omp parallel for schedule(OMP_SCHEDULE)
   for (CG_UINT rowID = 0; rowID < numRows; rowID++) {
     x[rowID] = 0.0;
 
@@ -111,16 +114,6 @@ static void solverCheckResidual(CommType *c, V_ELE *x, V_ELE *xexact, CG_UINT n)
   }
 }
 
-#if defined(RUNTIME_BACKEND_IS_CUDA) || defined(RUNTIME_BACKEND_IS_HIP)
-#define WAXBYFUNC gpu_waxpby_sync
-#define SPMVMFUNC gpu_spMVM
-#define DDOTFUNC gpu_ddot_sync
-#else
-#define WAXBYFUNC waxpby
-#define SPMVMFUNC spMVM
-#define DDOTFUNC ddot
-#endif
-
 #ifdef USE_COMPLEX
 #define CAST(v) VREAL((v))
 #else
@@ -182,27 +175,26 @@ static void applyA(CommType *comm, Matrix *A, V_ELE *p, V_ELE *ap)
 
 int solveCG(CommType *comm, Parameter *param, Matrix *A)
 {
-  CG_FLOAT eps = (CG_FLOAT)param->eps;
-  int itermax  = param->itermax;
+  NVTX_RANGE_PUSH_C("CG.solve", NVTX_C_CG);
+  CG_FLOAT eps   = (CG_FLOAT)param->eps;
+  int itermax    = param->itermax;
 
-  CG_UINT nrow = A->nr;
-  CG_UINT ncol = A->nc;
-  V_ELE *r     = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
-  V_ELE *p     = (V_ELE *)allocate(ARRAY_ALIGNMENT, ncol * sizeof(V_ELE));
-#ifdef SCS
-  V_ELE *ap = (V_ELE *)allocate(ARRAY_ALIGNMENT, A->nrPadded * sizeof(V_ELE));
-#else
-  V_ELE *ap = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
-#endif
-  V_ELE *x      = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
-  V_ELE *b      = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
-  V_ELE *xexact = NULL;
+  CG_UINT nrow   = A->nr;
 
-  if (strcmp(param->filename, "generate") == 0 ||
-      strcmp(param->filename, "generate7P") == 0) {
-    xexact = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
-  }
+  bool useXexact = (strcmp(param->filename, "generate") == 0 ||
+                    strcmp(param->filename, "generate7P") == 0);
 
+  CGData d;
+  allocCGData(&d, A, useXexact);
+
+  V_ELE *r      = d.r;
+  V_ELE *p      = d.p;
+  V_ELE *ap     = d.ap;
+  V_ELE *x      = d.x;
+  V_ELE *b      = d.b;
+  V_ELE *xexact = d.xexact;
+
+  NVTX_RANGE_PUSH_C("CG.setup", NVTX_C_CG);
   initVectors(A, x, b, xexact);
 
   // Permute colInd and vectors to SCS ordering so no per-iteration
@@ -210,12 +202,9 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
 #ifdef SCS
   CG_UINT *oldToNewPerm = A->oldToNewPerm;
   CG_UINT *newToOldPerm = A->newToOldPerm;
-  CG_UINT *colIndScs    = A->colInd;
-  CG_UINT nElemsScs     = A->nElems;
+  V_ELE *permTmp        = d.permTmp;
 
   // Permute b, x (and xexact) from original to SCS ordering
-  V_ELE *permTmp = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
-
   permute_vector(oldToNewPerm, b, permTmp, nrow);
   memcpy(b, permTmp, nrow * sizeof(V_ELE));
 
@@ -227,6 +216,7 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
     memcpy(xexact, permTmp, nrow * sizeof(V_ELE));
   }
 #endif
+  NVTX_RANGE_POP();
 
   CG_FLOAT normr  = 0.0;
   V_ELE rtrans    = 0.0;
@@ -241,10 +231,12 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
   }
   double timeStart, timeStop, ts;
 
+  NVTX_RANGE_PUSH_C("CG.initResidual", NVTX_C_CG);
   PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, x, 0.0, x, p));
   applyA(comm, A, p, ap);
   PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, b, -1.0, ap, r));
   PROFILE(DDOT, DDOTFUNC(nrow, r, r, &rtrans));
+  NVTX_RANGE_POP();
 
   normr = sqrt(CAST(rtrans));
   if (commIsMaster(comm)) {
@@ -253,6 +245,7 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
 
   int k;
   timeStart = getTimeStamp();
+  NVTX_RANGE_PUSH_C("CG.iterations", NVTX_C_CG);
   for (k = 1; k < itermax && normr > eps; k++) {
     if (k == 1) {
       PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, r, 0.0, r, p));
@@ -276,6 +269,7 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
     PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, x, alpha, p, x));
     PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, r, -alpha, ap, r));
   }
+  NVTX_RANGE_POP();
   timeStop = getTimeStamp();
 
   if (commIsMaster(comm)) {
@@ -290,19 +284,52 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
     permute_vector(newToOldPerm, xexact, permTmp, nrow);
     memcpy(xexact, permTmp, nrow * sizeof(V_ELE));
   }
-  deallocate(permTmp);
 #endif
 
   solverCheckResidual(comm, x, xexact, nrow);
 
-  deallocate(r);
-  deallocate(p);
-  deallocate(ap);
-  deallocate(x);
-  deallocate(b);
-  if (xexact != NULL) {
-    deallocate(xexact);
+  freeCGData(&d);
+
+  NVTX_RANGE_POP();
+  return k;
+}
+
+// NTS : makes allocation and dellocation centralized so that we dont
+// allocate any data during the iterations
+void allocCGData(CGData *d, Matrix *m, bool useXexact)
+{
+  CG_UINT nrow = m->nr;
+  CG_UINT ncol = m->nc;
+
+  d->r         = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
+  d->p         = (V_ELE *)allocate(ARRAY_ALIGNMENT, ncol * sizeof(V_ELE));
+#ifdef SCS
+  d->ap = (V_ELE *)allocate(ARRAY_ALIGNMENT, m->nrPadded * sizeof(V_ELE));
+#else
+  d->ap = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
+#endif
+  d->x      = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
+  d->b      = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
+
+  d->xexact = NULL;
+  if (useXexact) {
+    d->xexact = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
   }
 
-  return k;
+#ifdef SCS
+  d->permTmp = (V_ELE *)allocate(ARRAY_ALIGNMENT, nrow * sizeof(V_ELE));
+#else
+  d->permTmp = NULL;
+#endif
+}
+
+void freeCGData(CGData *d)
+{
+  deallocate(d->r);
+  deallocate(d->p);
+  deallocate(d->ap);
+  deallocate(d->x);
+  deallocate(d->b);
+  deallocate(d->xexact);
+  deallocate(d->permTmp);
 }

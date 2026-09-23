@@ -33,7 +33,7 @@ typedef struct {
 } Entry;
 
 typedef struct {
-  CG_UINT nr, nc, nnz; // number of rows, columns and non zeros
+  CG_UINT nr, nc, nnz;       // number of rows, columns and non zeros
   CG_UINT totalNr, totalNnz; // number of total rows and non zeros
   CG_UINT startRow, stopRow; // range of rows owned by current rank
   CG_UINT *rowPtr; // row Pointer
@@ -48,6 +48,17 @@ typedef struct {
   CG_UINT nr, nc; // number of rows, columns
   V_ELE *entries;
 } DMatrix; // for Block vectors
+
+/* Rows a (block) vector compatible with m must have: SCS pads the row count
+ * to a multiple of the chunk height C, CRS does not. */
+static inline CG_UINT matrixVecRows(const Matrix *m)
+{
+#ifdef SCS
+  return m->nrPadded;
+#else
+  return m->nr;
+#endif
+}
 
 typedef struct {
   int row;
@@ -79,6 +90,15 @@ extern void spMVM_local_range(const Matrix *m,
     CG_UINT rowStart,
     CG_UINT rowEnd);
 extern void spMVM_external(const Matrix *m, const V_ELE *restrict x, V_ELE *restrict y);
+
+// sizes of the nnz, nr etc must be already set so matrix specific allocation
+// and deallocation can be centralized
+extern void allocMatrix(Matrix *m);
+extern void freeMatrix(Matrix *m);
+
+// Free the CRS and MMmatrix style
+extern void freeGMatrix(GMatrix *m);
+extern void freeMMMatrix(MMMatrix *m);
 
 extern void MMMatrixPrintToFile(MMMatrix *m, char *filename);
 extern void MMMatrixPrint(MMMatrix *m);

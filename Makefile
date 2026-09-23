@@ -25,6 +25,9 @@ $(error Stopping after creating config.mk - please review and run make again)
 endif
 include config.mk
 include $(MAKE_DIR)/include_$(TOOLCHAIN).mk
+include $(MAKE_DIR)/include_LIKWID.mk
+include $(MAKE_DIR)/include_NVTX.mk
+include $(MAKE_DIR)/include_SECTIMER.mk
 include $(MAKE_DIR)/include_SCAMAC.mk
 INCLUDES  += -I$(SRC_DIR) -I$(BUILD_DIR)
 
@@ -53,10 +56,9 @@ CompileFlags:
   Compiler: clang
 endef
 
-# $(BUILD_DIR) is order-only: the flags stamp creates/removes a temp file in
-# it on every run, which would otherwise make the directory look 'newer' and
-# cause a pointless relink on alternating invocations.
-$(TARGET):  $(BUILD_DIR) $(SCAMAC_LIB) | .clangd $(ALL_OBJ)
+# $(BUILD_DIR) is order-only: its mtime changes whenever an object is written,
+# which would otherwise force a pointless relink on every invocation.
+$(TARGET): $(ALL_OBJ) $(SCAMAC_LIB) | $(BUILD_DIR) .clangd
 	$(info ===>  LINKING  $(TARGET))
 	$(Q)${LD} ${LFLAGS} -o $(TARGET) $(ALL_OBJ) $(LIBS)
 
@@ -64,12 +66,12 @@ $(SCAMAC_LIB): $(SCAMAC_SRC) $(MAKE_DIR)/include_$(TOOLCHAIN).mk config.mk
 	$(info ===>  BUILD  $(SCAMAC_LIB))
 	$(Q)$(MAKE) --no-print-directory -C $(SCAMAC_DIR)
 
-$(BUILD_DIR)/%.o:  %.c $(MAKE_DIR)/include_$(TOOLCHAIN).mk config.mk $(FLAGS_STAMP)
+$(BUILD_DIR)/%.o:  %.c $(MAKE_DIR)/include_$(TOOLCHAIN).mk $(MAKE_DIR)/include_SECTIMER.mk config.mk | $(BUILD_DIR)
 	$(info ===>  COMPILE  $@)
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) $< -o $@
 	$(Q)$(CC) $(CPPFLAGS) -MT $(@:.d=.o) -MM  $< > $(BUILD_DIR)/$*.d
 
-$(BUILD_DIR)/cuda_%.o: $(CUDA_DIR)/%.cu $(MAKE_DIR)/include_$(TOOLCHAIN).mk config.mk $(FLAGS_STAMP)
+$(BUILD_DIR)/cuda_%.o: $(CUDA_DIR)/%.cu $(MAKE_DIR)/include_$(TOOLCHAIN).mk $(MAKE_DIR)/include_SECTIMER.mk config.mk | $(BUILD_DIR)
 	$(info ===>  COMPILE CUDA  $@)
 	$(NVCC) -c $(NVCCFLAGS) $(DEFINES) $(OPTIONS) $(INCLUDES) $< -o $@
 
@@ -111,4 +113,4 @@ $(BUILD_DIR):
 .clangd:
 	$(file > .clangd,$(CLANGD_TEMPLATE))
 
--include $(OBJ:.o=.d)
+-include $(ALL_OBJ:.o=.d)

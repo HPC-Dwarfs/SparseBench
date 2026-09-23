@@ -23,9 +23,12 @@ extern int BenchType;
   "  -h         Show this help text\n"                                                   \
   "  -c <file name>   Convert MM matrix to binary matrix file.\n"                        \
   "  -f <parameter file>   Load options from a parameter file\n"                         \
-  "  -m <MM matrix>   Load a matrix market file\n"                                       \
-  "  -t <bench type>   Benchmark type, can be cg, spmv, or gmres. Default "              \
-  "cg.\n"                                                                                \
+  "  -m <matrix>   Matrix source: a Matrix Market file, 'generate' (27pt "               \
+  "stencil),\n"                                                                          \
+  "     'generate7P' (7pt stencil) or 'scamac:<argstring>' (ScaMaC generator),\n"        \
+  "     e.g. scamac:Anderson,Lx=100,Ly=100,Lz=100.\n"                                    \
+  "  -t <bench type>   Benchmark type, can be cg, spmv, spmmv, cheb or gmres. "          \
+  "Default cg\n"                                                                         \
   "  -x <int>   Size in x for generated matrix, ignored if MM file is "                  \
   "loaded. Default 100.\n"                                                               \
   "  -y <int>   Size in y for generated matrix, ignored if MM file is "                  \
@@ -35,9 +38,11 @@ extern int BenchType;
   "  -i <int>   Number of solver iterations. Default 150.\n"                             \
   "  -w <int>   Width of block vector for SpMMV\n"                                       \
   "  -v         Enable verbose output\n"                                                 \
-  "  -e <float>  Convergence criteria epsilon. Default 0.0.\n"
+  "  -e <float>  Convergence criteria epsilon. Default 0.0.\n"                           \
+  "  -d <int>   GPU device index (multi-GPU nodes). Default 0.\n"                        \
+  "ChebFD parameters are set via the parameter file (-f), not the CLI.\n"
 
-#define BASE_ARGS_COMMON "hc:t:f:m:x:y:z:i:e:w:v:"
+#define BASE_ARGS_COMMON "hc:t:f:m:x:y:z:i:e:w:v:d:"
 
 #ifdef SCS
 

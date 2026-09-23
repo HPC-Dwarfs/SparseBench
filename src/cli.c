@@ -30,6 +30,13 @@ static void writeBinMatrix(CommType *c, char *filename)
   commDistributeMatrix(c, &mm, &mmLocal);
   matrixConvertfromMM(&mmLocal, &m);
   matrixBinWrite(&m, c, changeFileEnding(filename, ".bmx"));
+
+  // Mirror initMatrix's cleanup
+  freeMMMatrix(&mmLocal);
+  if (commIsMaster(c)) {
+    freeMMMatrix(&mm);
+  }
+  freeGMatrix(&m);
 }
 #endif
 
@@ -57,14 +64,14 @@ void parseArguments(CommType *comm, Parameter *param, int argc, char **argv)
       commFinalize(comm);
       exit(EXIT_SUCCESS);
 #else
-      printf("Binary matrix files are only supported with MPI!\n");
-      exit(EXIT_SUCCESS);
+      commAbort(comm, "Binary matrix files are only supported with MPI!\n");
 #endif
+      break;
     case 'f':
       readParameter(param, optarg);
       break;
     case 'm':
-      param->filename = optarg;
+      setParameterFilename(param, optarg);
       break;
     case 't':
       if (strcmp(optarg, "cg") == 0) {
@@ -102,6 +109,9 @@ void parseArguments(CommType *comm, Parameter *param, int argc, char **argv)
       break;
     case 'v':
       param->verbose = (int)strtol(optarg, NULL, INT_BASE);
+      break;
+    case 'd':
+      param->device = (int)strtol(optarg, NULL, INT_BASE);
       break;
 #ifdef SCS
     case 'k':

@@ -115,6 +115,18 @@ void profilerPrint(CommType *c, int *seq, int numSeq, int iterations)
         double bytes = (double)Regions[j].words * iterations;
         double flops = (double)Regions[j].flops * iterations;
 
+        /* Zero accumulated time is legitimate (e.g. `-i 1` never enters the
+         * iteration loop); a rate would divide by zero and print inf/nan. */
+        if (tavg[j] <= 0.0) {
+          printf("%s%11s %11s %11.2f %11.2f %11.2f\n",
+              Regions[j].label,
+              "n/a",
+              "n/a",
+              tmin[j],
+              tmax[j],
+              tavg[j]);
+          continue;
+        }
         printf("%s%11.2f %11.2f %11.2f %11.2f %11.2f\n",
             Regions[j].label,
             rate(bytes, tavg[j]),
@@ -129,11 +141,16 @@ void profilerPrint(CommType *c, int *seq, int numSeq, int iterations)
       printf("rank\tkB\tkB/s\tWalltime(s)\n");
       for (int i = 0; i < c->size; i++) {
         double dataVolume = 1.0E-03 * commVolume[i];
-        printf("%d %11.2f %11.2f %11.2e\n",
-            i,
-            dataVolume,
-            (commTime[i] > 0.0) ? (dataVolume / commTime[i]) : 0.0,
-            commTime[i]);
+        /* T[COMM] stays 0.0 for benchmarks with no COMM region (SPMV/SPMMV). */
+        if (commTime[i] <= 0.0) {
+          printf("%d %11.2f %11s %11.2e\n", i, dataVolume, "n/a", commTime[i]);
+        } else {
+          printf("%d %11.2f %11.2f %11.2e\n",
+              i,
+              dataVolume,
+              dataVolume / commTime[i],
+              commTime[i]);
+        }
         totalVolume += commVolume[i];
       }
 
@@ -153,6 +170,11 @@ void profilerPrint(CommType *c, int *seq, int numSeq, int iterations)
       double bytes = (double)Regions[id].words * iterations;
       double flops = (double)Regions[id].flops * iterations;
 
+      /* See above: no recorded time means no rate, not inf/nan. */
+      if (T[id] <= 0.0) {
+        printf("%s%11s %11s %11.2f\n", Regions[id].label, "n/a", "n/a", T[id]);
+        continue;
+      }
       printf("%s%11.2f %11.2f %11.2f\n",
           Regions[id].label,
           rate(bytes, T[id]),

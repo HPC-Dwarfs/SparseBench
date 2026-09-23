@@ -11,9 +11,10 @@
 #
 # It is bundled in ext/scamac and always built as a static library with the
 # same toolchain as SparseBench (see the $(SCAMAC_LIB) rule in the Makefile).
-SCAMAC_DIR = ./ext/scamac
+SCAMAC_DIR ?= ./ext/scamac
 SCAMAC_LIB = $(SCAMAC_DIR)/build/$(TOOLCHAIN)/libscamac.a
 SCAMAC_SRC = $(wildcard $(SCAMAC_DIR)/src/*.[ch] $(SCAMAC_DIR)/includes/*.[ch])
 
 INCLUDES += -I$(SCAMAC_DIR)/includes
-LIBS     += $(SCAMAC_LIB) -lm
+DEFINES  += -D_SCAMAC
+LIBS     += $(SCAMAC_LIB)

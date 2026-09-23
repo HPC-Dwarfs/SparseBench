@@ -11,6 +11,7 @@
 int test_convertSCS(void *args, const char *dataDir)
 {
 
+  /* TODO: validate under _MPI — single-rank only; no commInit/commDistributeMatrix (full matrix on one process). */
   int rank = 0;
   int size = 1;
   int validFileCount = 0;
@@ -34,6 +35,7 @@ int test_convertSCS(void *args, const char *dataDir)
   DIR *dir = opendir(pathToMatrices);
   if (dir == NULL) {
     perror("Error opening directory");
+    free(pathToMatrices);
     return 1;
   }
 
@@ -45,7 +47,7 @@ int test_convertSCS(void *args, const char *dataDir)
       strcpy(pathToMatrix, pathToMatrices);
       strcat(pathToMatrix, entry->d_name);
 
-      Matrix A; // thsi is the crs/sell matrix
+      Matrix A; // this is the crs/sell matrix
       Args *arguments = (Args *)args;
       A.C             = arguments->C;
       A.sigma         = arguments->sigma;
@@ -94,9 +96,12 @@ int test_convertSCS(void *args, const char *dataDir)
         FILE *reportedData = xfopen(pathToReportedData, "w");
         if (reportedData == NULL) {
           free(pathToReportedData);
-          fclose(fptr);
           free(pathToExpectedData);
           free(pathToMatrix);
+          freeMatrix(&A);
+          freeGMatrix(&gm);
+          freeMMMatrix(&m);
+          fclose(fptr);
           free(pathToMatrices);
           closedir(dir);
           return 1;
@@ -110,12 +115,22 @@ int test_convertSCS(void *args, const char *dataDir)
           free(pathToReportedData);
           free(pathToExpectedData);
           free(pathToMatrix);
-
+          freeMatrix(&A);
+          freeGMatrix(&gm);
+          freeMMMatrix(&m);
+          fclose(fptr);
+          free(pathToMatrices);
           closedir(dir);
           return 1;
         }
+
+        free(pathToReportedData);
+        freeMatrix(&A);
+        freeGMatrix(&gm);
+        freeMMMatrix(&m);
       }
-      fclose(fptr);
+      if (fptr)
+        fclose(fptr);
       free(pathToExpectedData);
       free(pathToMatrix);
     }

@@ -5,6 +5,7 @@
 #ifndef __UTIL_H_
 #define __UTIL_H_
 
+#include <float.h>
 #include <string.h>
 
 #define HLINE "----------------------------------------------------------------------\n"
@@ -34,6 +35,13 @@
 #define MAXLINE 4096
 #endif
 
+// Fallback for #pragma omp parallel for schedule(OMP_SCHEDULE) when the
+// build system does not pass -DOMP_SCHEDULE=...  Must remain `static` for
+// NUMA first-touch correctness — see config.mk.
+#ifndef OMP_SCHEDULE
+#define OMP_SCHEDULE static
+#endif
+
 #if UINT_TYPE == 1
 #define CG_UINT unsigned int
 #define MPI_INT_TYPE MPI_UNSIGNED
@@ -46,9 +54,11 @@
 
 #if PRECISION == 1
 #define CG_FLOAT float
+#define CG_FLOAT_MAX FLT_MAX
 #define MPI_FLOAT_TYPE MPI_FLOAT
 #else
 #define CG_FLOAT double
+#define CG_FLOAT_MAX DBL_MAX
 #define MPI_FLOAT_TYPE MPI_DOUBLE
 #endif
 
