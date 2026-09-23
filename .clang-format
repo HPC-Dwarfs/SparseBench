@@ -1,19 +1,75 @@
+# Shared verbatim by every ob-* project. Change it here and copy it across:
+# src/sysfs*.{c,h} are byte-identical to ob-control's copies, and a formatting
+# divergence is exactly how a shared file stops being shared.
+#
+# The style is reachable, not aspirational: ob-panel formats to a zero diff
+# under clang-format 21, which makes it the reference. A tree that churns under
+# `make format' has drifted from this file, and the fix is to run it rather than
+# to bend the file. A change that makes *ob-panel* churn is a change to the
+# style itself, and should be argued for as one.
+
 BasedOnStyle: WebKit
-ReflowComments: Never
-AlignTrailingComments: false
-PointerAlignment: Right
-AlignOperands: Align
-ColumnLimit: 90
-BreakBeforeBinaryOperators: None
-PPIndentWidth: 1
+
 IndentWidth: 2
-RemoveParentheses: ReturnStatement
+ColumnLimit: 90 # .editorconfig's rulers = 80 is the eye target; this is the ceiling
+PointerAlignment: Right                  # char *p, never char* p
+AllowShortFunctionsOnASingleLine: Inline # a three-line accessor stays three lines
+
+# The comments are hand-laid - section dividers sized to the ruler, a bare //
+# as a paragraph break, backtick-apostrophe quoting - and reflowing would mangle
+# all of it.
+#
+# Leave rather than Never for the trailing ones: they are column-aligned where
+# it helps (the three fds in struct dev, src/backlight_linux.c) and single-
+# spaced where it does not, and both are deliberate. Never flattens the first
+# kind; Leave is the only value that keeps both.
+ReflowComments: Never
+AlignTrailingComments:
+  Kind: Leave
+
+# Every .c opens with its own header, alone, to prove it compiles standalone.
+# IncludeIsMainRegex would not recognise backlight.h as backlight_linux.c's own
+# header and would demote it into the project block, so the sort stays off. The
+# groups are already in order by hand.
+SortIncludes: false
+
+# Tables and level arithmetic read as columns.
 AlignArrayOfStructures: Left
-AlignAfterOpenBracket: DontAlign
-InsertTrailingCommas: Wrapped
-BinPackArguments: false
-BinPackParameters: OnePerLine
 AlignConsecutiveAssignments:
   Enabled: true
   AcrossEmptyLines: true
-AllowShortFunctionsOnASingleLine: Inline
+
+# One argument per line when they do not all fit on one, and operators end the
+# line rather than beginning the next. Both are load-bearing: WebKit would pack
+# the arguments and put the || at the start of the line.
+BinPackArguments: false
+BinPackParameters: OnePerLine
+AlignOperands: Align
+BreakBeforeBinaryOperators: None
+
+# ---------------------------------------------------------------- what is gone
+#
+# Four keys were removed rather than left to puzzle over. None of them changed a
+# byte of output in any ob-* tree, checked per file:
+#
+#   PPIndentWidth: 1              IndentPPDirectives defaults to None, so it can
+#                                 never take effect, and nothing nests a #if.
+#   InsertTrailingCommas: Wrapped a JavaScript option, inert on C - and a hard
+#                                 parse error the day BinPackArguments is true.
+#                                 The trailing commas in the tree are hand-typed.
+#   AlignAfterOpenBracket         DontAlign is already the WebKit default.
+#   RemoveParentheses             a no-op here, and upstream warns it can change
+#                                 what a program means.
+#
+# ------------------------------------------------------------ what stays out
+#
+# Two additions were tried and rejected, because both churn ob-panel and so are
+# style changes wearing the clothes of a cleanup:
+#
+#   AlignConsecutiveAssignments.AcrossComments: true   12 files in ob-panel, 6 here
+#   AlignConsecutiveMacros                              4 files in ob-panel, 3 here
+#
+# The case for AcrossComments is real - src/backlight_linux.c aligns d->read_fd,
+# d->level and d->write_fd across a three-line comment, and without it that run
+# is broken up. It loses anyway: one hand-aligned run is not worth reformatting
+# the one project that is currently clean.

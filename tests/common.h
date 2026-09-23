@@ -3,8 +3,35 @@
 
 #include "../src/util.h"
 #include "../src/vtype.h"
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+/* Create dirPath if it does not exist yet. Returns 0 on success (or if the
+ * directory already exists), -1 otherwise. The test cases write their
+ * "reported" output files into ./data/reported/, which is git-ignored and
+ * therefore does not exist on a fresh clone; opening a file for writing in a
+ * missing directory fails and previously crashed the tests with a segfault. */
+static int ensureDir(const char *dirPath)
+{
+  if (mkdir(dirPath, 0755) == 0 || errno == EEXIST) {
+    return 0;
+  }
+  fprintf(stderr, "Could not create directory %s: %s\n", dirPath, strerror(errno));
+  return -1;
+}
+
+/* fopen with an error message instead of a silently NULL result. */
+static FILE *xfopen(const char *path, const char *mode)
+{
+  FILE *f = fopen(path, mode);
+  if (f == NULL) {
+    fprintf(stderr, "Could not open %s: %s\n", path, strerror(errno));
+  }
+  return f;
+}
 
 #define REP_COUNT 3
 #define C_SIGMA_MAX 10
@@ -87,8 +114,8 @@ typedef struct {
 static inline void swap_ptrs(V_ELE **x_perm, V_ELE **y_perm)
 {
   V_ELE *tmp = *x_perm;
-  *x_perm       = *y_perm;
-  *y_perm       = tmp;
+  *x_perm    = *y_perm;
+  *y_perm    = tmp;
 }
 
 static int diff_files(const char *expectedData, const char *reportedData)

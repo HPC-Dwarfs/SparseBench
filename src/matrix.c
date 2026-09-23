@@ -32,10 +32,15 @@ void matrixGenerate(GMatrix *m, Parameter *p, int rank, int size, bool use_7pt_s
 {
 
   CG_UINT local_nrow = p->nx * p->ny * p->nz;
-  CG_UINT local_nnz  = 27 * local_nrow;
+  /* Upper bound on the entries this rank generates: 7 or 27 per row. Sized
+   * for the stencil in use, in size_t — 27 * rows overflows the 32-bit
+   * CG_UINT beyond ~159 M rows (nx ~ 542), which used to shrink the
+   * allocation silently and crash the fill loop. */
+  size_t stencilPts  = use_7pt_stencil ? 7 : 27;
+  size_t local_nnz   = stencilPts * (size_t)local_nrow;
 
   CG_UINT total_nrow = local_nrow * size;
-  CG_UINT total_nnz  = 27 * total_nrow;
+  double total_nnz   = (double)stencilPts * (double)total_nrow;
 
   int start_row      = local_nrow * rank;
   int stop_row       = start_row + local_nrow - 1;
@@ -46,7 +51,7 @@ void matrixGenerate(GMatrix *m, Parameter *p, int rank, int size, bool use_7pt_s
     } else {
       printf("Generate 27pt matrix with ");
     }
-    printf("%.2e total rows and %.2e nonzeros\n", (double)total_nrow, (double)total_nnz);
+    printf("%.2e total rows and up to %.2e nonzeros\n", (double)total_nrow, total_nnz);
   }
 
   m->entries = (Entry *)allocate(ARRAY_ALIGNMENT, local_nnz * sizeof(Entry));
@@ -77,7 +82,7 @@ void matrixGenerate(GMatrix *m, Parameter *p, int rank, int size, bool use_7pt_s
               // while the check for the curcol being valid is
               // sufficient to check the z values
               if ((ix + sx >= 0) && (ix + sx < nx) && (iy + sy >= 0) && (iy + sy < ny) &&
-                  (curcol >= 0 && curcol < total_nrow)) {
+                  (curcol >= 0 && (long long)curcol < (long long)total_nrow)) {
                 // This logic will skip over point that are not part of a
                 // 7-pt stencil
                 if (!use_7pt_stencil || (sz * sz + sy * sy + sx * sx <= 1)) {
@@ -115,6 +120,10 @@ void matrixGenerate(GMatrix *m, Parameter *p, int rank, int size, bool use_7pt_s
   m->nr       = local_nrow;
   m->nc       = local_nrow;
   m->nnz      = local_nnz;
+  // All three are set by reorderMatrixForOverlap after localization
+  m->rowLocalEnd   = NULL;
+  m->boundaryRows  = NULL;
+  m->nBoundaryRows = 0;
 }
 
 void MMMatrixRead(MMMatrix *m, char *filename)
@@ -186,7 +195,7 @@ void MMMatrixRead(MMMatrix *m, char *filename)
   double v, v_imag;
   MMEntry *entries = m->entries;
 
-  for (size_t i = 0; i < nz; i++) {
+  for (size_t i = 0; i < (size_t)nz; i++) {
     v_imag = 0.0;
 
     if (pattern_flag) {
@@ -216,6 +225,7 @@ void MMMatrixRead(MMMatrix *m, char *filename)
 
   fclose(f);
   m->nr       = M;
+  m->nc       = N;
   m->nnz      = cursor;
   m->count    = cursor;
   m->totalNr  = M;
@@ -237,37 +247,41 @@ void MMMatrixRead(MMMatrix *m, char *filename)
 
 void matrixConvertfromMM(MMMatrix *mm, GMatrix *m)
 {
-  m->startRow     = mm->startRow;
-  m->stopRow      = mm->stopRow;
-  m->totalNr      = mm->totalNr;
-  m->totalNnz     = mm->totalNnz;
-  m->nr           = mm->nr;
-  m->nc           = mm->nr;
-  m->nnz          = mm->nnz;
-  m->entries      = (Entry *)allocate(ARRAY_ALIGNMENT, m->nnz * sizeof(Entry));
-  m->rowPtr       = (CG_UINT *)allocate(ARRAY_ALIGNMENT, (m->nr + 1) * sizeof(CG_UINT));
+  m->startRow = mm->startRow;
+  m->stopRow  = mm->stopRow;
+  m->totalNr  = mm->totalNr;
+  m->totalNnz = mm->totalNnz;
+  m->nr       = mm->nr;
+  m->nc       = mm->nc;
+  m->nnz      = mm->nnz;
+  m->entries  = (Entry *)allocate(ARRAY_ALIGNMENT, m->nnz * sizeof(Entry));
+  m->rowPtr   = (CG_UINT *)allocate(ARRAY_ALIGNMENT, (m->nr + 1) * sizeof(CG_UINT));
+  // All three are set by reorderMatrixForOverlap after localization
+  m->rowLocalEnd   = NULL;
+  m->boundaryRows  = NULL;
+  m->nBoundaryRows = 0;
 
-  int *valsPerRow = (int *)allocate(ARRAY_ALIGNMENT, m->nr * sizeof(int));
+  int *valsPerRow  = (int *)allocate(ARRAY_ALIGNMENT, m->nr * sizeof(int));
 
-  for (int i = 0; i < m->nr; i++) {
+  for (CG_UINT i = 0; i < m->nr; i++) {
     valsPerRow[i] = 0;
   }
 
   MMEntry *entries = mm->entries;
   int startRow     = mm->startRow;
 
-  for (int i = 0; i < mm->count; i++) {
+  for (size_t i = 0; i < mm->count; i++) {
     valsPerRow[entries[i].row - startRow]++;
   }
 
   m->rowPtr[0] = 0;
 
   // convert to CCRS format
-  for (int rowID = 0; rowID < m->nr; rowID++) {
+  for (CG_UINT rowID = 0; rowID < m->nr; rowID++) {
     m->rowPtr[rowID + 1] = m->rowPtr[rowID] + valsPerRow[rowID];
 
     // loop over all elements in Row
-    for (int id = m->rowPtr[rowID]; id < m->rowPtr[rowID + 1]; id++) {
+    for (CG_UINT id = m->rowPtr[rowID]; id < m->rowPtr[rowID + 1]; id++) {
 #ifdef USE_COMPLEX
       m->entries[id].val = VCONST(entries[id].val, entries[id].val_imag);
 #else
@@ -276,6 +290,26 @@ void matrixConvertfromMM(MMMatrix *mm, GMatrix *m)
       m->entries[id].col = (CG_UINT)entries[id].col;
     }
   }
+
+  deallocate(valsPerRow);
+}
+
+void freeGMatrix(GMatrix *m)
+{
+  deallocate(m->rowPtr);
+  deallocate(m->entries);
+  // Only allocated when localization reordered the matrix for overlap
+  if (m->rowLocalEnd != NULL) {
+    deallocate(m->rowLocalEnd);
+  }
+  if (m->boundaryRows != NULL) {
+    deallocate(m->boundaryRows);
+  }
+}
+
+void freeMMMatrix(MMMatrix *m)
+{
+  deallocate(m->entries);
 }
 
 void MMMatrixPrintToFile(MMMatrix *m, char *filename)

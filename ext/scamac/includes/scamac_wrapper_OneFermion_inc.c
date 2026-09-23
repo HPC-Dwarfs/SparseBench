@@ -1,0 +1,17 @@
+ScamacErrorCode scamac_wrapper_OneFermion_check(const scamac_wrapper_OneFermion_params_st * par, char ** desc) {
+  if (!par)  { return scamac_error_set_par(SCAMAC_ENULL,1); }
+  ScamacErrorCode err = SCAMAC_EOK;
+  scamac_string_st str;
+  if (desc) { scamac_string_empty(&str); }
+  assert((par->bc== option_open) || (par->bc== option_periodic));
+  if (!((par->n_sites) > 0)) {
+    err=SCAMAC_EINVALID;
+    if (desc) { scamac_string_append(&str,"\n"); }
+  }
+  if (!((par->n_sites) <= 1000)) {
+    err=SCAMAC_EWARNING;
+    if (desc) { scamac_string_append(&str,"[WARNING] n_sites is very large\n"); }
+  }
+  if (desc) { *desc = scamac_string_get(&str); }
+  return err;
+  }

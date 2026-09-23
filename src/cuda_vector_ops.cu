@@ -4,15 +4,16 @@
  * license that can be found in the LICENSE file. */
 
 /*
- * Common CUDA vector operations: waxpby and ddot.
- * Each kernel lives in its own .cu file for easy extensibility —
- * add new kernels by creating additional .cu files in src/cuda/.
+ * Common CUDA vector operations (waxpby, waxpby3, ddot), device init /
+ * finalize and the mode-selectable allocation helpers.
  */
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "cuda_kernels.h"
 #include "gpu_backend.h"
+#include "gpu_cub.h"
+#include "nvtx_marker.h"
 
 /* ------------------------------------------------------------------ */
 /*  waxpby:  w = alpha*x + beta*y                                    */
@@ -26,97 +27,134 @@ __global__ void kernel_waxpby(
   }
 }
 
-extern "C" void gpu_waxpby(
-    CG_UINT n, V_ELE alpha, const V_ELE *x, V_ELE beta, const V_ELE *y, V_ELE *w)
+/* ------------------------------------------------------------------ */
+/*  waxpby3:  w = a*x + b*y + c*z                                    */
+/*                                                                    */
+/*  Only one call per ChebFD filter application (against Np calls of  */
+/*  the recurrence kernel), but it still has to run on the device:    */
+/*  under managed memory the cost of a host-side kernel is not its    */
+/*  flops, it is migrating all three blocks host-ward and back once   */
+/*  per filter application.                                           */
+/* ------------------------------------------------------------------ */
+__global__ void kernel_waxpby3(CG_UINT n,
+    V_ELE a,
+    const V_ELE *x,
+    V_ELE b,
+    const V_ELE *y,
+    V_ELE c,
+    const V_ELE *z,
+    V_ELE *w)
+{
+  CG_UINT i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    w[i] = a * x[i] + b * y[i] + c * z[i];
+  }
+}
+
+extern "C" void gpu_waxpby3(CG_UINT n,
+    V_ELE a,
+    const V_ELE *x,
+    V_ELE b,
+    const V_ELE *y,
+    V_ELE c,
+    const V_ELE *z,
+    V_ELE *w)
 {
   int threads = 256;
-  int blocks  = (n + threads - 1) / threads;
-  kernel_waxpby<<<blocks, threads>>>(n, alpha, x, beta, y, w);
+  int blocks  = (int)((n + threads - 1) / threads);
+  kernel_waxpby3<<<blocks, threads>>>(n, a, x, b, y, c, z, w);
+  GPU_CHECK_LAUNCH();
+}
+
+extern "C" void gpu_waxpby3_sync(CG_UINT n,
+    V_ELE a,
+    const V_ELE *x,
+    V_ELE b,
+    const V_ELE *y,
+    V_ELE c,
+    const V_ELE *z,
+    V_ELE *w)
+{
+  NVTX_RANGE_PUSH_C("gpu.waxpby3", NVTX_C_VECTOR);
+  gpu_waxpby3(n, a, x, b, y, c, z, w);
+  GPU_CHECK_CALL(gpuDeviceSynchronize());
+  NVTX_RANGE_POP();
 }
 
 /* ------------------------------------------------------------------ */
-/*  ddot:  result = x^T * y   (uses shared-memory reduction)         */
+/*  ddot:  result = x^T * y   (one launch: BlockReduce + atomicAdd)   */
 /* ------------------------------------------------------------------ */
-__global__ void kernel_ddot(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *partial)
+#define DDOT_THREADS 256
+
+/* atomicAdd for V_ELE — there is no complex atomic, so under USE_COMPLEX
+ * the components accumulate separately (thrust::complex accessors return
+ * by value, so the component pointers come from a reinterpret_cast onto
+ * the layout-locked {real, imag} pair). */
+__device__ static inline void atomicAddV(V_ELE *dst, V_ELE v)
 {
-  extern __shared__ V_ELE sdata[];
-
-  CG_UINT tid = threadIdx.x;
-  CG_UINT i   = blockIdx.x * blockDim.x + threadIdx.x;
-
-  sdata[tid]  = (i < n) ? VCONJ(x[i]) * y[i] : VCONST(0, 0);
-  __syncthreads();
-
-  for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
-    if (tid < s)
-      sdata[tid] += sdata[tid + s];
-    __syncthreads();
-  }
-
-  if (tid == 0)
-    partial[blockIdx.x] = sdata[0];
+#ifdef USE_COMPLEX
+  typename V_ELE::value_type *c =
+      reinterpret_cast<typename V_ELE::value_type *>(dst);
+  atomicAdd(c + 0, VREAL(v));
+  atomicAdd(c + 1, VIMAG(v));
+#else
+  atomicAdd(dst, v);
+#endif
 }
 
-/* Final stage: collapse the per-block partials into a single scalar
- * entirely on the device, so the host side only has to copy back
- * sizeof(V_ELE) bytes per ddot. */
-__global__ void kernel_ddot_finalize(CG_UINT n, const V_ELE *partial, V_ELE *result)
+/* Each block CUB-reduces its contiguous slice, then thread 0 folds the
+ * block sum straight into the result scalar with one atomicAdd — the whole
+ * dot product runs in a single launch and only *result changes hands.
+ * NB: the cross-block atomicAdd order is not fixed, so the sum wobbles at
+ * ULP level between runs (the in-block CUB reduction is deterministic). */
+__global__ void kernel_ddot(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *result)
 {
-  extern __shared__ V_ELE sfin[];
+  using BlockReduce = gpucub::BlockReduce<V_ELE, DDOT_THREADS>;
+  __shared__ typename BlockReduce::TempStorage tmp;
 
-  CG_UINT tid = threadIdx.x;
-  V_ELE v     = VCONST(0, 0);
-  for (CG_UINT i = tid; i < n; i += blockDim.x) {
-    v += partial[i];
+  CG_UINT i = blockIdx.x * blockDim.x + threadIdx.x;
+  V_ELE v   = (i < n) ? VCONJ(x[i]) * y[i] : VCONST(0, 0);
+
+  V_ELE sum = BlockReduce(tmp).Sum(v);
+  if (threadIdx.x == 0) {
+    atomicAddV(result, sum);
   }
-  sfin[tid] = v;
-  __syncthreads();
-
-  for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
-    if (tid < s)
-      sfin[tid] += sfin[tid + s];
-    __syncthreads();
-  }
-
-  if (tid == 0)
-    *result = sfin[0];
 }
 
-/* Persistent scratch for ddot — sized lazily on first / largest call,
- * freed in gpu_finalize(). Plain device memory (not managed) so there
- * is no per-call page migration and no per-call alloc/free overhead. */
-static V_ELE *g_ddot_partial    = NULL;
-static size_t g_ddot_partial_cap = 0; /* capacity in elements */
-static V_ELE *g_ddot_result_d   = NULL;
+/* The device scalar the host-facing wrappers reduce into. */
+static V_ELE *g_ddot_result_d = NULL;
 
-static void ensure_ddot_scratch(size_t blocks)
+static void ensure_ddot_result(void)
 {
-  if (blocks > g_ddot_partial_cap) {
-    if (g_ddot_partial != NULL) {
-      GPU_SAFE_CALL(gpuFree(g_ddot_partial));
-    }
-    GPU_SAFE_CALL(gpuMalloc((void **)&g_ddot_partial, blocks * sizeof(V_ELE)));
-    g_ddot_partial_cap = blocks;
-  }
   if (g_ddot_result_d == NULL) {
-    GPU_SAFE_CALL(gpuMalloc((void **)&g_ddot_result_d, sizeof(V_ELE)));
+    GPU_CHECK_CALL(gpuMalloc((void **)&g_ddot_result_d, sizeof(V_ELE)));
   }
+}
+
+/* The whole dot product on the GPU: one kernel launch reduces x^T*y and
+ * updates *result_d in device memory. Asynchronous — no host transfer,
+ * no sync. Callers consume *result_d with subsequent device work or an
+ * explicit copy; gpu_ddot / gpu_ddot_sync do the latter. */
+extern "C" void gpu_ddot_device(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *result_d)
+{
+  int threads = DDOT_THREADS;
+  int blocks  = (int)((n + threads - 1) / threads);
+
+  /* atomicAdd accumulates, so the scalar starts each dot from zero. The
+   * async zero is enqueued on the same stream as the kernel, so ordering
+   * is guaranteed and the host never blocks on it. */
+  GPU_CHECK_CALL(gpuMemsetAsync(result_d, 0, sizeof(V_ELE), 0));
+
+  kernel_ddot<<<blocks, threads>>>(n, x, y, result_d);
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_ddot(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *result)
 {
-  int threads = 256;
-  int blocks  = (n + threads - 1) / threads;
+  ensure_ddot_result();
+  gpu_ddot_device(n, x, y, g_ddot_result_d);
 
-  ensure_ddot_scratch((size_t)blocks);
-
-  kernel_ddot<<<blocks, threads, threads * sizeof(V_ELE)>>>(n, x, y, g_ddot_partial);
-
-  int finalize_threads = 256;
-  kernel_ddot_finalize<<<1, finalize_threads, finalize_threads * sizeof(V_ELE)>>>(
-      blocks, g_ddot_partial, g_ddot_result_d);
-
-  GPU_SAFE_CALL(gpuMemcpy(result, g_ddot_result_d, sizeof(V_ELE), gpuMemcpyDeviceToHost));
+  GPU_CHECK_CALL(gpuMemcpy(result, g_ddot_result_d, sizeof(V_ELE), gpuMemcpyDeviceToHost));
 }
 
 /* ------------------------------------------------------------------ */
@@ -124,44 +162,124 @@ extern "C" void gpu_ddot(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *resul
 /* ------------------------------------------------------------------ */
 extern "C" void gpu_init(int device)
 {
-  GPU_SAFE_CALL(GCXX_RUNTIME_BACKEND(SetDevice)(device));
+  NVTX_RANGE_PUSH_C("gpu.init", NVTX_C_SETUP);
+  GPU_CHECK_CALL(GCXX_RUNTIME_BACKEND(SetDevice)(device));
 
   gpuDeviceProp_t prop;
-  GPU_SAFE_CALL(GCXX_RUNTIME_BACKEND(GetDeviceProperties)(&prop, device));
+  GPU_CHECK_CALL(GCXX_RUNTIME_BACKEND(GetDeviceProperties)(&prop, device));
   printf("%s device: %s (compute %d.%d)\n",
       GPU_BACKEND_STR,
       prop.name,
       prop.major,
       prop.minor);
+  NVTX_RANGE_POP();
 }
 
 extern "C" void gpu_finalize(void)
 {
-  if (g_ddot_partial != NULL) {
-    GPU_SAFE_CALL(gpuFree(g_ddot_partial));
-    g_ddot_partial     = NULL;
-    g_ddot_partial_cap = 0;
-  }
+  NVTX_RANGE_PUSH_C("gpu.finalize", NVTX_C_SETUP);
+  gpu_chebfd_scratch_free();
   if (g_ddot_result_d != NULL) {
-    GPU_SAFE_CALL(gpuFree(g_ddot_result_d));
+    GPU_CHECK_CALL(gpuFree(g_ddot_result_d));
     g_ddot_result_d = NULL;
   }
-  GPU_SAFE_CALL(GCXX_RUNTIME_BACKEND(DeviceReset)());
+  GPU_CHECK_CALL(GCXX_RUNTIME_BACKEND(DeviceReset)());
+  NVTX_RANGE_POP();
 }
 
 /* ------------------------------------------------------------------ */
-/*  Managed-memory allocation helpers                                 */
+/*  Mode-selectable allocation helpers (see AllocType in allocate.h)  */
 /* ------------------------------------------------------------------ */
-extern "C" void *gpu_allocate_managed(size_t bytes)
+/* The mode locks at the first gpu_allocate (see allocDispatch); a later
+ * change is rejected instead of mixing placements whose buffers free with
+ * different deallocators. main.c sets the mode before any allocation. */
+static AllocType g_alloc_type = ALLOC_MANAGED;
+static int g_alloc_locked     = 0;
+
+extern "C" void gpu_set_alloc_type(AllocType type)
+{
+  if (g_alloc_locked && type != g_alloc_type) {
+    fprintf(stderr,
+        "Error: gpu_set_alloc_type(%s) refused — buffers were already "
+        "allocated as %s.\n",
+        allocTypeName(type),
+        allocTypeName(g_alloc_type));
+    exit(EXIT_FAILURE);
+  }
+  g_alloc_type = type;
+  if (type == ALLOC_PAGEABLE) {
+    fprintf(stderr,
+        "Warning: pageable host memory is only device-accessible where the driver "
+        "transparently maps host pages; prefer explicit or managed for buffers passed to "
+        "kernels.\n");
+  }
+}
+
+static void *allocDispatch(size_t bytes, int device)
 {
   void *ptr = NULL;
-  GPU_SAFE_CALL(gpuMallocManaged(&ptr, bytes));
-  return ptr;
+  g_alloc_locked = 1;
+  if (device && g_alloc_type == ALLOC_EXPLICIT) {
+    GPU_CHECK_CALL(gpuMalloc(&ptr, bytes));
+    return ptr;
+  }
+  switch (g_alloc_type) {
+  case ALLOC_PAGEABLE:
+    ptr = malloc(bytes);
+    if (ptr == NULL) {
+      fprintf(stderr, "Error: malloc of %zu bytes failed!\n", bytes);
+      exit(EXIT_FAILURE);
+    }
+    return ptr;
+  case ALLOC_EXPLICIT:
+    GPU_CHECK_CALL(gpuMallocHost(&ptr, bytes));
+    return ptr;
+  case ALLOC_MANAGED:
+  default:
+    GPU_CHECK_CALL(gpuMallocManaged(&ptr, bytes));
+    return ptr;
+  }
 }
 
-extern "C" void gpu_free_managed(void *ptr)
+extern "C" void *gpu_allocate(size_t bytes)
 {
-  GPU_SAFE_CALL(gpuFree(ptr));
+  return allocDispatch(bytes, 0);
+}
+
+extern "C" void *gpu_allocate_device(size_t bytes)
+{
+  return allocDispatch(bytes, 1);
+}
+
+static void freeDispatch(void *ptr, int device)
+{
+  /* Keep in sync with allocDispatch. */
+  if (device && g_alloc_type == ALLOC_EXPLICIT) {
+    GPU_CHECK_CALL(gpuFree(ptr));
+    return;
+  }
+  switch (g_alloc_type) {
+  case ALLOC_PAGEABLE:
+    free(ptr);
+    break;
+  case ALLOC_EXPLICIT:
+    GPU_CHECK_CALL(gpuFreeHost(ptr));
+    break;
+  case ALLOC_MANAGED:
+  default:
+    GPU_CHECK_CALL(gpuFree(ptr));
+    break;
+  }
+}
+
+extern "C" void gpu_free(void *ptr)
+{
+  freeDispatch(ptr, 0);
+}
+
+extern "C" void gpu_free_device(void *ptr)
+{
+  freeDispatch(ptr, 1);
 }
 
 /* ------------------------------------------------------------------ */
@@ -173,29 +291,26 @@ extern "C" void gpu_waxpby_nosync(
   int threads = 256;
   int blocks  = (n + threads - 1) / threads;
   kernel_waxpby<<<blocks, threads>>>(n, alpha, x, beta, y, w);
+  GPU_CHECK_LAUNCH();
 }
 
 extern "C" void gpu_waxpby_sync(
     CG_UINT n, V_ELE alpha, const V_ELE *x, V_ELE beta, const V_ELE *y, V_ELE *w)
 {
+  NVTX_RANGE_PUSH_C("gpu.waxpby", NVTX_C_VECTOR);
   gpu_waxpby_nosync(n, alpha, x, beta, y, w);
-  GPU_SAFE_CALL(gpuDeviceSynchronize());
+  GPU_CHECK_CALL(gpuDeviceSynchronize());
+  NVTX_RANGE_POP();
 }
 
 extern "C" void gpu_ddot_sync(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *result)
 {
-  int threads = 256;
-  int blocks  = (n + threads - 1) / threads;
-
-  ensure_ddot_scratch((size_t)blocks);
-
-  kernel_ddot<<<blocks, threads, threads * sizeof(V_ELE)>>>(n, x, y, g_ddot_partial);
-
-  int finalize_threads = 256;
-  kernel_ddot_finalize<<<1, finalize_threads, finalize_threads * sizeof(V_ELE)>>>(
-      blocks, g_ddot_partial, g_ddot_result_d);
+  NVTX_RANGE_PUSH_C("gpu.ddot", NVTX_C_VECTOR);
+  ensure_ddot_result();
+  gpu_ddot_device(n, x, y, g_ddot_result_d);
 
   /* gpuMemcpy is synchronous w.r.t. the host, so it both waits for the
-   * kernels above and delivers the scalar — no separate DeviceSynchronize. */
-  GPU_SAFE_CALL(gpuMemcpy(result, g_ddot_result_d, sizeof(V_ELE), gpuMemcpyDeviceToHost));
+   * kernel above and delivers the scalar — no separate DeviceSynchronize. */
+  GPU_CHECK_CALL(gpuMemcpy(result, g_ddot_result_d, sizeof(V_ELE), gpuMemcpyDeviceToHost));
+  NVTX_RANGE_POP();
 }
