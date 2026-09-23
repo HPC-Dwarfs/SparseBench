@@ -132,16 +132,15 @@ static void randomInitBlock(CommType *comm, CG_UINT nr, CG_UINT vecRows, V_ELE *
                                  (unsigned long long)k * 0xC2B2AE3D27D4EB4Full;
         unsigned long long h   = splitmix64(key);
         double rv              = (double)(h >> 11) / (double)(1ull << 53) * 2.0 - 1.0;
+        double iv              = 0.0;
 #ifdef USE_COMPLEX
         /* Independent second stream for the imaginary part: a real-only
          * start block spans a coordinate subspace and can be orthogonal to
          * the wanted eigenvectors of a complex problem. */
         unsigned long long h2 = splitmix64(key ^ 0x2545F4914F6CDD1Dull);
-        double iv             = (double)(h2 >> 11) / (double)(1ull << 53) * 2.0 - 1.0;
-        e[r * (CG_UINT)nv + (CG_UINT)k] = VCONST(rv, iv);
-#else
-        e[r * (CG_UINT)nv + (CG_UINT)k] = (V_ELE)rv;
+        iv                    = (double)(h2 >> 11) / (double)(1ull << 53) * 2.0 - 1.0;
 #endif
+        e[r * (CG_UINT)nv + (CG_UINT)k] = VCONST(rv, iv);
       }
     } else {
       for (int k = 0; k < nv; k++) {
@@ -374,7 +373,9 @@ void gramYtAY(CG_UINT nr, int m, const V_ELE *Ye, const V_ELE *AYe, V_ELE *H)
         hv += VCONJ(Ye[r * (CG_UINT)m + i]) * AYe[r * (CG_UINT)m + j];
       }
       H[i * m + j] = hv;
-      H[j * m + i] = VCONJ(hv);
+      if (i != j) { /* a conjugate rewrite of the diagonal would flip its imag sign */
+        H[j * m + i] = VCONJ(hv);
+      }
     }
   }
 }

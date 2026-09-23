@@ -25,6 +25,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Fixture phase for the shared phase-tridiag builders: real builds exercise
+ * the plain real Laplacian (phi = 0), complex builds a genuinely
+ * complex-Hermitian gauge. The spectrum is phi-independent either way. */
+#ifdef USE_COMPLEX
+static const double TEST_PHI = 1.0;
+#else
+static const double TEST_PHI = 0.0;
+#endif
+
 /* ---- Section 1: chebFilterInit (src/chebFilter.c) --------------------- */
 
 /* Direct scalar evaluation of p(x) = sum_n gc[n] T_n(alpha x + beta), kept
@@ -108,33 +117,23 @@ static double jacobiResidual(
   return sqrt(VREAL(res2));
 }
 
-static int testJacobiEigen(void)
+/* Closed-form check of one jacobiEigen fixture: every eigenvalue must match
+ * tridiagEigenvalue and every eigenvector satisfy A v = lambda v against the
+ * untouched copy Aref. Returns 1 if all pairs pass (CHECK needs `ok`). */
+static int checkTridiagPairs(const V_ELE *Aref,
+    const double *eval,
+    const V_ELE *evec,
+    int n,
+    const char *tag)
 {
   int ok = 1;
-  printf("  jacobiEigen:\n");
-
-  const int n = 6;
-  V_ELE Aref[36], Awork[36];
-  memset(Aref, 0, sizeof(Aref));
-  for (int i = 0; i < n; i++) {
-    Aref[i * n + i] = VCONST(2.0, 0.0);
-    if (i > 0) {
-      Aref[i * n + (i - 1)] = VCONST(-1.0, 0.0);
-      Aref[(i - 1) * n + i] = VCONST(-1.0, 0.0);
-    }
-  }
-  memcpy(Awork, Aref, sizeof(Aref));
-
-  double eval[6];
-  V_ELE evec[36];
-  jacobiEigen(Awork, n, eval, evec);
-
   for (int k = 1; k <= n; k++) {
     double lambdaRef;
     tridiagEigenvalue(n, k, &lambdaRef);
     double got = eval[k - 1];
     CHECK(fabs(got - lambdaRef) < 1e-9,
-        "eval[%d]=%.10g expected %.10g",
+        "%seval[%d]=%.10g expected %.10g",
+        tag,
         k - 1,
         got,
         lambdaRef);
@@ -142,69 +141,46 @@ static int testJacobiEigen(void)
     /* Residual check against the untouched copy. */
     double res = jacobiResidual(Aref, evec, got, n, k - 1);
     CHECK(res < 1e-8,
-        "||A v_%d - lambda v_%d|| = %.3e too large",
+        "%s||A v_%d - lambda v_%d|| = %.3e too large",
+        tag,
         k - 1,
         k - 1,
         res);
   }
+  return ok;
+}
+
+static int testJacobiEigen(void)
+{
+  int ok = 1;
+  printf("  jacobiEigen:\n");
+
+  const int n = 6;
+  V_ELE Aref[36], Awork[36];
+  phaseTridiagDense(Aref, n, 0.0);
+  memcpy(Awork, Aref, sizeof(Aref));
+
+  double eval[6];
+  V_ELE evec[36];
+  jacobiEigen(Awork, n, eval, evec);
+  ok = checkTridiagPairs(Aref, eval, evec, n, "") && ok;
 
 #ifdef USE_COMPLEX
   /* Complex Hermitian: the phase-gauged Laplacian with phi = pi/2, dense
    * (every off-diagonal purely imaginary). The spectrum is phi-independent
    * (tridiagEigenvalue); eigenvectors are checked via residuals and
    * orthonormality only. */
-  double phi = M_PI / 2.0;
   V_ELE Bref[36], Bwork[36];
-  for (int i = 0; i < n; i++) {
-    for (int j = 0; j < n; j++) {
-      V_ELE val = VCONST(0.0, 0.0);
-      if (i == j) {
-        val = VCONST(2.0, 0.0);
-      } else if (j == i + 1) {
-        val = VCONST(-cos(phi), sin(phi)); /* -e^{-i phi} */
-      } else if (j == i - 1) {
-        val = VCONST(-cos(phi), -sin(phi)); /* -e^{+i phi} */
-      }
-      Bref[i * n + j] = val;
-    }
-  }
+  phaseTridiagDense(Bref, n, M_PI / 2.0);
   memcpy(Bwork, Bref, sizeof(Bwork));
 
   double beval[6];
   V_ELE bevec[36];
   jacobiEigen(Bwork, n, beval, bevec);
-
-  for (int k = 1; k <= n; k++) {
-    double lambdaRef;
-    tridiagEigenvalue(n, k, &lambdaRef);
-    CHECK(fabs(beval[k - 1] - lambdaRef) < 1e-9,
-        "complex eval[%d]=%.10g expected %.10g",
-        k - 1,
-        beval[k - 1],
-        lambdaRef);
-
-    double res = jacobiResidual(Bref, bevec, beval[k - 1], n, k - 1);
-    CHECK(res < 1e-8,
-        "complex ||A v_%d - lambda v_%d|| = %.3e too large",
-        k - 1,
-        k - 1,
-        res);
-  }
+  ok = checkTridiagPairs(Bref, beval, bevec, n, "complex ") && ok;
 
   /* Complex eigenvectors must be orthonormal under the Hermitian dot. */
-  double ortho = 0.0;
-  for (int i = 0; i < n; i++) {
-    for (int j = i; j < n; j++) {
-      V_ELE dot = VCONST(0.0, 0.0);
-      for (int r = 0; r < n; r++) {
-        dot += VCONJ(bevec[r * n + (CG_UINT)i]) * bevec[r * n + (CG_UINT)j];
-      }
-      double d = VABS(dot - VCONST((i == j) ? 1.0 : 0.0, 0.0));
-      if (d > ortho) {
-        ortho = d;
-      }
-    }
-  }
+  double ortho = gramOffDiagMax(bevec, n, n);
   CHECK(ortho < 1e-8, "complex eigenvector orthonormality residual %.3e", ortho);
 #endif /* USE_COMPLEX */
 
@@ -330,11 +306,7 @@ static int testApplyFilter(void)
   printf("  applyFilter:\n");
 
   const int n = 10;
-#ifdef USE_COMPLEX
-  const double phi = 1.0; /* genuinely complex off-diagonals */
-#else
-  const double phi = 0.0; /* plain real Laplacian */
-#endif
+  const double phi = TEST_PHI;
   Matrix A;
   GMatrix gm;
   buildPhaseTridiagMatrix(&A, &gm, n, 1, 1, phi);
@@ -406,25 +378,6 @@ static int testApplyFilter(void)
 
 /* ---- Section 5: orthoMGS (Step 6) -------------------------------------- */
 
-static double gramOffDiagMax(V_ELE *e, CG_UINT nr, int m)
-{
-  double maxOff = 0.0;
-  for (int i = 0; i < m; i++) {
-    for (int j = i; j < m; j++) {
-      V_ELE dot = VCONST(0.0, 0.0);
-      for (CG_UINT r = 0; r < nr; r++) {
-        dot += VCONJ(e[r * (CG_UINT)m + (CG_UINT)i]) *
-               e[r * (CG_UINT)m + (CG_UINT)j];
-      }
-      double target = (i == j) ? 1.0 : 0.0;
-      double d      = VABS(dot - VCONST(target, 0.0));
-      if (d > maxOff)
-        maxOff = d;
-    }
-  }
-  return maxOff;
-}
-
 static int testOrthoMGS(void)
 {
   int ok = 1;
@@ -465,11 +418,7 @@ static int testRayleighRitzAndResidual(void)
   printf("  rayleighRitz / computeRitzResidual / residualNorm:\n");
 
   const int n = 8;
-#ifdef USE_COMPLEX
-  const double phi = 1.0;
-#else
-  const double phi = 0.0;
-#endif
+  const double phi = TEST_PHI;
   Matrix A;
   GMatrix gm;
   buildPhaseTridiagMatrix(&A, &gm, n, 1, 1, phi);
@@ -524,11 +473,7 @@ static int testSolveChebFDEndToEnd(void)
   printf("  solveChebFD (end-to-end):\n");
 
   const int n = 40;
-#ifdef USE_COMPLEX
-  const double phi = 1.0; /* complex-Hermitian end-to-end run */
-#else
-  const double phi = 0.0;
-#endif
+  const double phi = TEST_PHI; /* complex-Hermitian end-to-end run on complex builds */
   Matrix A;
   GMatrix gm;
   buildPhaseTridiagMatrix(&A, &gm, n, 1, 1, phi);

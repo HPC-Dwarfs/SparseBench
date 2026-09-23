@@ -74,6 +74,7 @@ void jacobiEigen(V_ELE *a, int n, double *eval, V_ELE *evec)
 
           /* unit phase of a_pq; exactly +-1 for real input */
           V_ELE e      = w / (V_ELE)wabs;
+          V_ELE econj  = VCONJ(e);
 
           double h_rot = t * wabs;
           a[p * n + p] = VCONST(app - h_rot, 0.0);
@@ -85,14 +86,16 @@ void jacobiEigen(V_ELE *a, int n, double *eval, V_ELE *evec)
             if (k != p && k != q) {
               V_ELE akp    = a[k * n + p];
               V_ELE akq    = a[k * n + q];
-              a[k * n + p] = akp - s * (VCONJ(e) * akq + tau * akp);
-              a[p * n + k] = VCONJ(a[k * n + p]);
-              a[k * n + q] = akq + s * (e * akp - tau * akq);
-              a[q * n + k] = VCONJ(a[k * n + q]);
+              V_ELE np     = akp - s * (econj * akq + tau * akp);
+              V_ELE nq     = akq + s * (e * akp - tau * akq);
+              a[k * n + p] = np;
+              a[p * n + k] = VCONJ(np);
+              a[k * n + q] = nq;
+              a[q * n + k] = VCONJ(nq);
             }
             V_ELE vkp       = evec[k * n + p];
             V_ELE vkq       = evec[k * n + q];
-            evec[k * n + p] = vkp - s * (VCONJ(e) * vkq + tau * vkp);
+            evec[k * n + p] = vkp - s * (econj * vkq + tau * vkp);
             evec[k * n + q] = vkq + s * (e * vkp - tau * vkq);
           }
         }

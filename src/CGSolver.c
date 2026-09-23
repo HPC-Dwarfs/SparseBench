@@ -111,12 +111,6 @@ static void initVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
 //   }
 // }
 
-#ifdef USE_COMPLEX
-#define CAST(v) VREAL((v))
-#else
-#define CAST(v) v
-#endif
-
 int solveCG(CommType *comm, Parameter *param, Matrix *A)
 {
   NVTX_RANGE_PUSH_C("CG.solve", NVTX_C_CG);
@@ -184,7 +178,7 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
   PROFILE(DDOT, DDOTFUNC(nrow, r, r, &rtrans));
   NVTX_RANGE_POP();
 
-  normr = sqrt(CAST(rtrans));
+  normr = sqrt(VREAL(rtrans));
   if (commIsMaster(comm)) {
     printf("Initial Residual = %E\n", normr);
   }
@@ -201,7 +195,7 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
       V_ELE beta = rtrans / oldrtrans;
       PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, r, beta, p, p));
     }
-    normr = sqrt(CAST(rtrans));
+    normr = sqrt(VREAL(rtrans));
 
     if (commIsMaster(comm) && (k % printFreq == 0 || k + 1 == itermax)) {
       printf("Iteration = %d Residual = %E\n", k, normr);

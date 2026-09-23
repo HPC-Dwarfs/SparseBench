@@ -151,7 +151,7 @@ __global__ void kernel_vs_ritz_chunk(CG_UINT rows,
     for (int y = 0; y < RES_ROWS; y++) {
       s += sv[y][threadIdx.x];
     }
-    partial[(size_t)blockIdx.x * (size_t)nsel + (size_t)t] = VCONST(VREAL(s), 0);
+    partial[(size_t)blockIdx.x * (size_t)nsel + (size_t)t] = s;
   }
 }
 

@@ -99,7 +99,10 @@ __global__ void kernel_gram_accum(
   }
   V_ELE v = (accumulate ? G[(size_t)i * (size_t)m + (size_t)j] : VCONST(0, 0)) + s;
   G[(size_t)i * (size_t)m + (size_t)j] = v;
-  G[(size_t)j * (size_t)m + (size_t)i] = VCONJ(v);
+  if (i != j) {
+    // Mirror of an off-diagonal pair.
+    G[(size_t)j * (size_t)m + (size_t)i] = VCONJ(v);
+  }
 }
 
 /* Ritz residual: avbuf = AY*evk - evalk*(Y*evk), evk complex */
