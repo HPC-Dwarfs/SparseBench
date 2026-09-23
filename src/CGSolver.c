@@ -11,8 +11,8 @@
 
 #include "allocate.h"
 #include "comm.h"
-#include "cuda/kernel_dispatch.h"
-#include "cuda/nvtx_marker.h"
+#include "kernel_dispatch.h"
+#include "nvtx_marker.h"
 #include "profiler.h"
 #include "solver.h"
 #include "timing.h"

@@ -10,7 +10,7 @@
 
 #include "allocate.h"
 #ifdef _GPU
-#include "cuda/cuda_kernels.h"
+#include "cuda_kernels.h"
 #endif
 
 const char *allocTypeName(AllocType type)

@@ -13,11 +13,11 @@
 #include "chebFDSolver.h"
 #include "cli.h"
 #include "comm.h"
-#include "cuda/kernel_dispatch.h"
+#include "kernel_dispatch.h"
 #include "matrix.h"
 #include "matrixBinfile.h"
 #include "matrixScamac.h"
-#include "cuda/nvtx_marker.h"
+#include "nvtx_marker.h"
 #include "parameter.h"
 #include "profiler.h"
 #include "solver.h"
@@ -26,7 +26,7 @@
 #include "vtype.h"
 
 #if defined(RUNTIME_BACKEND_IS_CUDA) || defined(RUNTIME_BACKEND_IS_HIP)
-#include "cuda/cuda_kernels.h"
+#include "cuda_kernels.h"
 #endif
 
 // NUMA first-touch fill

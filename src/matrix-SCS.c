@@ -8,7 +8,7 @@
 
 #include "allocate.h"
 #include "matrix.h"
-#include "cuda/nvtx_marker.h"
+#include "nvtx_marker.h"
 
 static inline int compareDesc(const void *a, const void *b)
 {
