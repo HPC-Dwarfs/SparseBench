@@ -76,19 +76,27 @@ void gershgorinBounds(CommType *comm, Matrix *A, double *a_out, double *b_out)
 
 #else
   CG_UINT *rowPtr = A->rowPtr;
+#ifdef CCRS
+  mEntry *entries = A->entries;
+#define GERSH_COL(j) entries[j].col
+#define GERSH_VAL(j) entries[j].val
+#else
   CG_UINT *colInd = A->colInd;
   V_ELE *val      = A->val;
-  CG_UINT nr      = A->nr;
+#define GERSH_COL(j) colInd[j]
+#define GERSH_VAL(j) val[j]
+#endif
+  CG_UINT nr = A->nr;
 
 #pragma omp parallel for schedule(OMP_SCHEDULE) reduction(min : lo) reduction(max : hi)
   for (CG_UINT i = 0; i < nr; i++) {
     double diag = 0.0;
     double off  = 0.0;
     for (CG_UINT j = rowPtr[i]; j < rowPtr[i + 1]; j++) {
-      if (colInd[j] == i) {
-        diag += VREAL(val[j]);
+      if (GERSH_COL(j) == i) {
+        diag += VREAL(GERSH_VAL(j));
       } else {
-        off += VABS(val[j]); /* modulus of the complex entry */
+        off += VABS(GERSH_VAL(j)); /* modulus of the complex entry */
       }
     }
     double rowLo = diag - off;
@@ -98,6 +106,8 @@ void gershgorinBounds(CommType *comm, Matrix *A, double *a_out, double *b_out)
     if (rowHi > hi)
       hi = (CG_FLOAT)rowHi;
   }
+#undef GERSH_COL
+#undef GERSH_VAL
 #endif
   /* commReduction supports MAX only; obtain the min via negation. */
   CG_FLOAT neglo = -lo;

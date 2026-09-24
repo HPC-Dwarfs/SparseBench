@@ -1,17 +1,24 @@
 #!/bin/bash
 
-# Compile all 2^4 format combinations
-# Combinations: SCS/CRS × true/false (complex) × SP/DP (float) × U/ULL (uint)
-# Total: 2 × 2 × 2 × 2 = 16 builds
+# Compile all format combinations
+# Combinations: SCS/CRS/CCRS × true/false (complex) × SP/DP (float)
+#               × U/ULL (uint)
+# Total: 3 × 2 × 2 × 2 = 24 builds
 
 set -e  # Exit on error
 # Check if toolchain argument is provided
 if [ -z "$1" ]; then
   echo "Error: Toolchain must be passed as the first argument possible (GCC, CLANG, ICX, NVCC, HIP)"
-  echo "Usage: $0 <TOOLCHAIN>"
+  echo "Usage: $0 <TOOLCHAIN> [ENABLE_MPI=true|false]"
   exit 1
 fi
 TOOLCHAIN="${1}"  # Fixed toolchain
+# Optional second argument overrides ENABLE_MPI; without it the value from
+# config.mk is used (unchanged behavior).
+MPI_OVERRIDE=()
+if [ -n "$2" ]; then
+  MPI_OVERRIDE=("ENABLE_MPI=$2")
+fi
 BUILD_DIR="./builds"
 LOG_DIR="./compile_logs"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -20,8 +27,15 @@ TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 mkdir -p "$BUILD_DIR"
 mkdir -p "$LOG_DIR"
 
+# Compute the total number of combinations up front for progress messages
+MTX_FORMATS=("SCS" "CRS" "CCRS")
+COMPLEX_OPTIONS=("true" "false")
+FLOAT_TYPES=("SP" "DP")
+UINT_TYPES=("U" "ULL")
+TOTAL_BUILDS=$(( ${#MTX_FORMATS[@]} * ${#COMPLEX_OPTIONS[@]} * ${#FLOAT_TYPES[@]} * ${#UINT_TYPES[@]} ))
+
 echo "======================================"
-echo "Compiling 16 Format Combinations"
+echo "Compiling $TOTAL_BUILDS Format Combinations"
 echo "Toolchain: $TOOLCHAIN"
 echo "Timestamp: $TIMESTAMP"
 echo "======================================"
@@ -30,11 +44,6 @@ echo "======================================"
 echo "Running initial distclean..."
 make distclean > /dev/null 2>&1 || true
 
-# Arrays for combinations
-MTX_FORMATS=("SCS" "CRS")
-COMPLEX_OPTIONS=("true" "false")
-FLOAT_TYPES=("SP" "DP")
-UINT_TYPES=("U" "ULL")
 
 BUILD_COUNT=0
 SUCCESS_COUNT=0
@@ -56,8 +65,8 @@ for mtx in "${MTX_FORMATS[@]}"; do
         DEST_DIR="${BUILD_DIR}/${BUILD_NAME}"
 
         echo ""
-        echo "[${BUILD_COUNT}/16] Building: $BUILD_NAME"
-        echo "  MTX_FMT=$mtx  COMPLEX=$complex  FLOAT=$float_type  UINT=$uint_type"
+        echo "[${BUILD_COUNT}/${TOTAL_BUILDS}] Building: $BUILD_NAME"
+        echo "  MTX_FMT=$mtx  USE_COMPLEX_ELEMENTS=$complex  FLOAT=$float_type  UINT=$uint_type"
 
         # Clean before each build to avoid stale artifacts
         make distclean > /dev/null 2>&1 || true
@@ -68,6 +77,7 @@ for mtx in "${MTX_FORMATS[@]}"; do
                 FLOAT_TYPE="$float_type" \
                 UINT_TYPE="$uint_type" \
                 TOOLCHAIN="$TOOLCHAIN" \
+                "${MPI_OVERRIDE[@]}" \
                 ENABLE_NVTX="false" \
                 ENABLE_SECTIMER="false" \
                 >> "$LOG_FILE" 2>&1; then

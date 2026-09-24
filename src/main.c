@@ -80,7 +80,8 @@ static void initMatrix(CommType *c, Parameter *p, GMatrix *m)
       commAbort(c, "Binary matrix files are only supported with MPI!\n");
 #endif
     } else {
-      commAbort(c, "Unknown matrix file format!\n");
+      /* Running on an uninitialized matrix is useless; stop all ranks. */
+      commAbort(c, "Unknown matrix file format (expected .mtx or .bmx)");
     }
   }
 }
@@ -128,6 +129,7 @@ int main(int argc, char **argv)
   GMatrix m;
   NVTX_RANGE_PUSH_C("Main.initMatrix", NVTX_C_CONVERT);
   double timeStart = getTimeStamp();
+  printf("Probe Matrix %s\n", param.filename);
   initMatrix(&comm, &param, &m);
   commBarrier();
   double timeStop = getTimeStamp();
@@ -145,6 +147,14 @@ int main(int argc, char **argv)
   sm.sigma = param.Sigma;
 #endif
   convertMatrix(&sm, &m);
+
+#ifdef SCS
+  /* The solver holds its vectors in SCS (permuted) order, but the halo pack
+   * indices built by commLocalization refer to the original row numbering.
+   * Remap them once so commExchange sends the values of the correct rows. */
+  commRemapSendIndices(&comm, sm.oldToNewPerm);
+#endif
+
   commBarrier();
   timeStop = getTimeStamp();
   if (commIsMaster(&comm)) {
@@ -153,32 +163,69 @@ int main(int argc, char **argv)
   }
   NVTX_RANGE_POP();
 
-  size_t factorFlops[NUMREGIONS];
-  size_t factorWords[NUMREGIONS];
+  size_t factorFlops[NUMREGIONS] = { 0 };
+  size_t factorWords[NUMREGIONS] = { 0 };
 
   // TODO : update the flops based on V_ELE type
   factorFlops[DDOT]   = m.totalNr;
   factorWords[DDOT]   = 3 * sizeof(CG_FLOAT) * m.totalNr / 2;
   factorFlops[WAXPBY] = m.totalNr;
   factorWords[WAXPBY] = 3 * sizeof(CG_FLOAT) * m.totalNr;
-  factorFlops[SPMVM]  = m.totalNnz;
-  factorWords[SPMVM]  = (sizeof(CG_FLOAT) * m.totalNnz) + (sizeof(CG_UINT) * m.totalNnz);
+  /* m.nnz / m.totalNnz are allocation upper bounds for generated matrices
+   * (27 entries per row regardless of stencil and of boundary truncation), so
+   * they would over-report every SpMV rate. The real local count is rowPtr[nr];
+   * sum it up to get the global one. */
+  CG_FLOAT nnzSum = (CG_FLOAT)m.rowPtr[m.nr];
+  commReduction(&nnzSum, SUM);
+  size_t globalNnz    = (size_t)nnzSum;
+
+  factorFlops[SPMVM]  = globalNnz;
+  factorWords[SPMVM]  = (sizeof(CG_FLOAT) * globalNnz) + (sizeof(CG_UINT) * globalNnz);
   factorFlops[SPMMVM] = factorFlops[SPMVM] * param.blockwidth;
   factorWords[SPMMVM] = factorWords[SPMVM] * param.blockwidth;
 
+#ifdef CRS
+  /* The split kernels each only touch part of the matrix, so they need their
+   * own nnz counts - charging both the full nnz would report twice the work
+   * that is actually done. By construction local + external == globalNnz. */
+  CG_UINT localNnzLocal = 0;
+  for (CG_UINT i = 0; i < sm.nr; i++) {
+    localNnzLocal += sm.rowLocalEnd[i] - sm.rowPtr[i];
+  }
+
+  CG_FLOAT localNnzSum = (CG_FLOAT)localNnzLocal;
+  CG_FLOAT extNnzSum   = (CG_FLOAT)(sm.rowPtr[sm.nr] - localNnzLocal);
+  commReduction(&localNnzSum, SUM);
+  commReduction(&extNnzSum, SUM);
+
+  size_t localNnz          = (size_t)localNnzSum;
+  size_t extNnz            = (size_t)extNnzSum;
+
+  factorFlops[SPMVM_LOCAL] = localNnz;
+  factorWords[SPMVM_LOCAL] = (sizeof(CG_FLOAT) * localNnz) + (sizeof(CG_UINT) * localNnz);
+  factorFlops[SPMVM_EXT]   = extNnz;
+  factorWords[SPMVM_EXT]   = (sizeof(CG_FLOAT) * extNnz) + (sizeof(CG_UINT) * extNnz);
+#endif
+
   profilerInit(factorFlops, factorWords);
 
-  // previously using stack local stored data resulting in undefined behaviour
-  int seqCg[3]    = { DDOT, WAXPBY, SPMVM };
-  int seqSpmv[1]  = { SPMVM };
-  int seqSpmmv[1] = { SPMMVM };
+  int k = 0;
+  /* Storage for the profiler region sequences at function scope: seq is
+   * handed to profilerPrint() after the switch, so pointing it at arrays
+   * declared inside the switch would dangle (stack-use-after-scope). */
+  int seqCgPlain[3]   = { DDOT, WAXPBY, SPMVM };
+  int seqCgOverlap[5] = { DDOT, WAXPBY, SPMVM_LOCAL, SPMVM_EXT, COMM_WAIT };
+  int seqSpmvMpi[2]   = { SPMVM, COMM };
+  int seqSpmv[1]      = { SPMVM };
+  int seqSpmmv[1]     = { SPMMVM };
 
-  int numSeq      = 0;
-  int *seq        = NULL;
-  int rc          = EXIT_SUCCESS;
+  int numSeq          = 0;
+  int *seq            = NULL;
+  int rc              = EXIT_SUCCESS;
 
-  // input vectors must span nc.
-  // Output vectors must span nr padded
+  /* Input vectors must span nc (locals + externals after localization); output
+   * vectors must span nrPadded because the SCS kernels also write the padded
+   * row slots. */
 #ifdef SCS
   CG_UINT inSize  = MAX(sm.nc, sm.nrPadded);
   CG_UINT outSize = sm.nrPadded;
@@ -187,11 +234,15 @@ int main(int argc, char **argv)
   CG_UINT outSize = sm.nr;
 #endif
 
-  int k = 0;
   switch (BenchType) {
   case CG:
+#ifdef USE_OVERLAP_SPMVM
+    numSeq = 5;
+    seq    = seqCgOverlap;
+#else
     numSeq = 3;
-    seq    = seqCg;
+    seq    = seqCgPlain;
+#endif
     if (commIsMaster(&comm)) {
       printf("Test type: CG\n");
     }
@@ -201,8 +252,14 @@ int main(int argc, char **argv)
     break;
 
   case SPMV: {
+#ifdef _MPI
+    /* The exchange is part of every well-formed distributed SpMV benchmark */
+    numSeq = 2;
+    seq    = seqSpmvMpi;
+#else
     numSeq = 1;
     seq    = seqSpmv;
+#endif
     if (commIsMaster(&comm)) {
       printf("Test type: SPMVM\n");
     }
@@ -216,6 +273,8 @@ int main(int argc, char **argv)
 
     NVTX_RANGE_PUSH_C("Bench.SPMV", NVTX_C_MATVEC);
     for (k = 1; k < itermax; k++) {
+      /* Refresh the halo like a real application would; no-op without MPI. */
+      PROFILE(COMM, commExchange(&comm, sm.nr, x));
       PROFILE(SPMVM, SPMVMFUNC(&sm, x, y));
     }
     NVTX_RANGE_POP();
@@ -268,11 +327,20 @@ int main(int argc, char **argv)
   } break;
 
   case GMRES:
+    /* Same kernels and SpMV path (solverApplyA) as CG */
+#ifdef USE_OVERLAP_SPMVM
+    numSeq = 5;
+    seq    = seqCgOverlap;
+#else
+    numSeq = 3;
+    seq    = seqCgPlain;
+#endif
     if (commIsMaster(&comm)) {
       printf("Test type: GMRES\n");
-      printf("GMRES not implemented yet\n");
     }
-    commAbort(&comm, "GMRES not implemented yet\n");
+    NVTX_RANGE_PUSH_C("Bench.GMRES", NVTX_C_CG);
+    k = solveGMRES(&comm, &param, &sm);
+    NVTX_RANGE_POP();
     break;
 
   case CHEBFD: {
@@ -305,7 +373,7 @@ int main(int argc, char **argv)
   }
 
   if (rc == EXIT_SUCCESS && numSeq > 0) {
-    profilerPrint(&comm, seq, numSeq, k);
+    profilerPrint(&comm, seq, numSeq);
   }
   profilerFinalize();
   NVTX_RANGE_PUSH_C("Main.cleanup", NVTX_C_SETUP);

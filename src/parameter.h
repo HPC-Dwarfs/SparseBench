@@ -31,6 +31,7 @@ typedef struct {
   int Sigma;
 #endif
   int blockwidth;
+  int restart;
   int verbose;
   int device;
   AllocType allocType; /* GPU buffer placement; ignored by the CPU build and

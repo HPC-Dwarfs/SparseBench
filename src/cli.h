@@ -25,8 +25,8 @@ extern int BenchType;
   "  -f <parameter file>   Load options from a parameter file\n"                         \
   "  -m <matrix>   Matrix source: a Matrix Market file, 'generate' (27pt "               \
   "stencil),\n"                                                                          \
-  "     'generate7P' (7pt stencil) or 'scamac:<argstring>' (ScaMaC generator,\n"         \
-  "     needs ENABLE_SCAMAC), e.g. scamac:Anderson,Lx=100,Ly=100,Lz=100.\n"              \
+  "     'generate7P' (7pt stencil) or 'scamac:<argstring>' (ScaMaC generator),\n"        \
+  "     e.g. scamac:Anderson,Lx=100,Ly=100,Lz=100.\n"                                    \
   "  -t <bench type>   Benchmark type, can be cg, spmv, spmmv, cheb or gmres. "          \
   "Default cg\n"                                                                         \
   "  -x <int>   Size in x for generated matrix, ignored if MM file is "                  \
@@ -40,9 +40,10 @@ extern int BenchType;
   "  -v         Enable verbose output\n"                                                 \
   "  -e <float>  Convergence criteria epsilon. Default 0.0.\n"                           \
   "  -d <int>   GPU device index (multi-GPU nodes). Default 0.\n"                        \
+  "  -r <int>   GMRES restart dimension. Default 30.\n"                                  \
   "ChebFD parameters are set via the parameter file (-f), not the CLI.\n"
 
-#define BASE_ARGS_COMMON "hc:t:f:m:x:y:z:i:e:w:v:d:"
+#define BASE_ARGS_COMMON "hc:t:f:m:x:y:z:i:e:w:r:v:d:"
 
 #ifdef SCS
 

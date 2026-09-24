@@ -59,6 +59,10 @@ dkms.conf
 
 # Test Data
 tests/runTests
+tests/runTests_asan
+tests/haloCheck
+core
+core.*
 tests/*.o
 tests/matrix/*.o
 tests/data/reported/*
@@ -66,7 +70,7 @@ tests/data/reported/*
 .idea
 .DS_Store
 compile_commands.json
-data
+/data
 out-*.txt
 config.mk
 

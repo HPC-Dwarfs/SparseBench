@@ -34,6 +34,16 @@ int test_spmmvSCS(void *args, const char *dataDir)
   int size           = 1;
   int validFileCount = 0;
 
+  /* The reported/ output directory is git-ignored, create it if missing */
+  char *pathToReported = malloc(strlen(dataDir) + strlen("reported/") + 1);
+  strcpy(pathToReported, dataDir);
+  strcat(pathToReported, "reported/");
+  if (ensureDir(pathToReported) != 0) {
+    free(pathToReported);
+    return 1;
+  }
+  free(pathToReported);
+
   // Open the directory
   char *pathToMatrices = malloc(strlen(dataDir) + strlen("testMatrices/") + 1);
   strcpy(pathToMatrices, dataDir);
@@ -178,14 +188,19 @@ int test_spmmvSCS(void *args, const char *dataDir)
         snprintf(out_file_name, sizeof(out_file_name), "_spmmv_x_%d.out", repeat_count);
         BUILD_MATRIX_FILE_PATH(
             entry, "reported/", out_file_name, C_str, sigma_str, pathToReportedData);
-        FILE *reportedData = fopen(pathToReportedData, "w");
-        if (reportedData == NULL) {
-          perror("Error opening reported data file");
-          printf("pathToReportedData = %s\n", pathToReportedData);
-          exit(EXIT_FAILURE);
-        }
+        FILE *reportedData = xfopen(pathToReportedData, "w");
 
         printf("pathToReportedData = %s\n", pathToReportedData);
+
+        if (reportedData == NULL) {
+          fclose(fptr);
+          free(pathToReportedData);
+          free(pathToExpectedData);
+          free(pathToMatrix);
+          free(pathToMatrices);
+          closedir(dir);
+          return 1;
+        }
 
         dumpDMatrix_impl(&y, reportedData);
         fclose(reportedData);

@@ -1,0 +1,17 @@
+my_string = malloc(180* sizeof *my_string);
+strncpy(&my_string[0], "Anderson ",9);
+strncpy(&my_string[9], "DiagonalReal ",13);
+strncpy(&my_string[22], "Exciton ",8);
+strncpy(&my_string[30], "FreeBosonChain ",15);
+strncpy(&my_string[45], "FreeFermionChain ",17);
+strncpy(&my_string[62], "Harmonic ",9);
+strncpy(&my_string[71], "Hubbard ",8);
+strncpy(&my_string[79], "Membrane1 ",10);
+strncpy(&my_string[89], "OneFermion ",11);
+strncpy(&my_string[100], "SpinChainXXZ ",13);
+strncpy(&my_string[113], "TightBinding ",13);
+strncpy(&my_string[126], "TopIns ",7);
+strncpy(&my_string[133], "Tridiagonal ",12);
+strncpy(&my_string[145], "TridiagonalComplex ",19);
+strncpy(&my_string[164], "TridiagonalReal ",16);
+my_string[179] = 0;

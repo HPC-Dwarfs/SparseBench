@@ -15,9 +15,14 @@ ENABLE_MPI ?= false
 # Enable OpenMP shared memory parallelization (true or false)
 # Can be combined with MPI
 ENABLE_OPENMP ?= false
-# Generate matrices in-process from the ScaMaC library (true or false).
-# Needs a ScaMaC installation - see mk/include_SCAMAC.mk (SCAMAC_INSTALL).
-ENABLE_SCAMAC ?= false
+# Overlap the CG halo exchange with the local part of the SpMV (true or false).
+# Only takes effect for the CPU CRS backend with MPI enabled.
+ENABLE_OVERLAP ?= true
+# Number of row chunks the local SpMV is split into while the halo exchange is
+# in flight. After every chunk MPI_Test is called to drive progress, since most
+# MPI implementations make none on their own. 1 disables the nudging; higher
+# values cost one extra OpenMP barrier per chunk.
+OVERLAP_NUDGE_CHUNKS ?= 8
 FLOAT_TYPE ?= DP # SP for float, DP for double
 UINT_TYPE ?= U # U for unsigned int, ULL for unsigned long long int
 USE_COMPLEX_ELEMENTS ?= false
@@ -57,6 +62,10 @@ OPTIONS +=  -DOMP_SCHEDULE=$(OMP_SCHEDULE)
 DEFINES =
 DEFINES += -D$(MTX_FMT)
 DEFINES += -DNUMVEC=$(NUM_VEC)
+
+ifeq ($(strip $(ENABLE_OVERLAP)),true)
+    DEFINES += -DENABLE_OVERLAP
+endif
 
 ifeq ($(strip $(FLOAT_TYPE)),SP)
     DEFINES += -DPRECISION=1

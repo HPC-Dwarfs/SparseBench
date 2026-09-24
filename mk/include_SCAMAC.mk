@@ -3,22 +3,18 @@
 # Use of this source code is governed by a MIT-style
 # license that can be found in the LICENSE file.
 
-# ScaMaC matrix generation (src/matrixScamac.c).
+# ScaMaC matrix generation.
 #
 # ScaMaC (Scalable Matrix Collection, https://bitbucket.org/essex/matrixcollection,
 # modified BSD license) generates application matrices of scalable size from
 # parameter strings, e.g.  -m scamac:Anderson,Lx=100,Ly=100,Lz=100,ranpot=2.5
 #
-# It is an external dependency, linked like LIKWID/NVTX: opt-in via
-# ENABLE_SCAMAC in config.mk. 
-SCAMAC_INSTALL ?= $(HOME)/.local/scamac
+# It is bundled in ext/scamac and always built as a static library with the
+# same toolchain as SparseBench (see the $(SCAMAC_LIB) rule in the Makefile).
+SCAMAC_DIR ?= ./ext/scamac
+SCAMAC_LIB = $(SCAMAC_DIR)/build/$(TOOLCHAIN)/libscamac.a
+SCAMAC_SRC = $(wildcard $(SCAMAC_DIR)/src/*.[ch] $(SCAMAC_DIR)/includes/*.[ch])
 
-ifeq ($(strip $(ENABLE_SCAMAC)),true)
-  ifeq ($(wildcard $(SCAMAC_INSTALL)/include/scamac.h),)
-    $(error ENABLE_SCAMAC=true needs a ScaMaC installation - no scamac.h in $(SCAMAC_INSTALL)/include (set SCAMAC_INSTALL))
-  endif
-INCLUDES += -I$(SCAMAC_INSTALL)/include
-DEFINES += -D_SCAMAC
-LIBS += -lscamac -lm
-LFLAGS += -L$(SCAMAC_INSTALL)/lib
-endif
+INCLUDES += -I$(SCAMAC_DIR)/includes
+DEFINES  += -D_SCAMAC
+LIBS     += $(SCAMAC_LIB)

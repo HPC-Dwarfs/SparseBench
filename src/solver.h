@@ -9,7 +9,24 @@
 #include "util.h"
 #include "vtype.h"
 
+/* Communication/computation overlap is only available for the CPU CRS backend,
+ * where the split kernels spMVM_local/spMVM_external exist. For the GPU backends
+ * and the SCS format, fall back to a blocking halo exchange plus a full SpMV.
+ * Defined here rather than in CGSolver.c so that the profiler configuration in
+ * main.c cannot disagree with the path the solver actually takes. */
+#if defined(ENABLE_OVERLAP) && defined(_MPI) && defined(CRS) &&                          \
+    !defined(RUNTIME_BACKEND_IS_CUDA) && !defined(RUNTIME_BACKEND_IS_HIP)
+#define USE_OVERLAP_SPMVM
+#endif
+
+/* Number of row chunks the local SpMV is split into so that MPI progress can be
+ * nudged in between. Set from config.mk; 1 disables the chunking. */
+#ifndef OVERLAP_NUDGE_CHUNKS
+#define OVERLAP_NUDGE_CHUNKS 8
+#endif
+
 extern int solveCG(CommType *comm, Parameter *param, Matrix *m);
+extern int solveGMRES(CommType *comm, Parameter *param, Matrix *m);
 
 typedef struct {
   V_ELE *r;
@@ -24,6 +41,15 @@ typedef struct {
 // centralized methods to allocate and deallocate
 extern void allocCGData(CGData *d, Matrix *m, bool useXexact);
 extern void freeCGData(CGData *d);
+
+// helpers shared by the iterative solvers (solverCommon.c)
+extern void solverInitVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact);
+extern void solverCheckResidual(CommType *c, V_ELE *x, V_ELE *xexact, CG_UINT n);
+extern void solverApplyA(CommType *comm, Matrix *A, V_ELE *p, V_ELE *ap);
+#ifdef SCS
+extern void solverPermuteVectors(
+    const CG_UINT *perm, V_ELE *tmp, CG_UINT n, V_ELE *x, V_ELE *b, V_ELE *xexact);
+#endif
 
 // extern void solverCheckResidual(Solver* s, Comm* c);
 extern void spMVM(Matrix *m, const V_ELE *restrict x, V_ELE *restrict y);

@@ -29,20 +29,23 @@ include $(MAKE_DIR)/include_LIKWID.mk
 include $(MAKE_DIR)/include_NVTX.mk
 include $(MAKE_DIR)/include_SECTIMER.mk
 include $(MAKE_DIR)/include_SCAMAC.mk
-INCLUDES  += -I$(SRC_DIR)/includes -I$(BUILD_DIR)
+INCLUDES  += -I$(SRC_DIR) -I$(BUILD_DIR)
 
 VPATH     = $(SRC_DIR)
 ASM       = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.s,$(wildcard $(SRC_DIR)/*.c))
 OBJ       = $(filter-out $(BUILD_DIR)/matrix-%, $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o,$(wildcard $(SRC_DIR)/*.c)))
-SRC       = $(wildcard $(SRC_DIR)/*.h $(SRC_DIR)/*.c)
+SRC       = $(wildcard $(SRC_DIR)/*.h $(SRC_DIR)/*.c $(SRC_DIR)/*.cuh $(SRC_DIR)/*.cu)
 CPPFLAGS := $(CPPFLAGS) $(DEFINES) $(OPTIONS) $(INCLUDES)
 
+# GPU kernel objects (when TOOLCHAIN=NVCC or HIP)
+CUDA_SRC  = $(wildcard $(SRC_DIR)/*.cu)
+CUDA_OBJ  = $(patsubst $(SRC_DIR)/%.cu, $(BUILD_DIR)/%.o, $(CUDA_SRC))
 ifneq (,$(filter $(TOOLCHAIN),NVCC HIP))
   CPPFLAGS += -D_GPU
-  OBJ   += $(patsubst $(SRC_DIR)/%.cu, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/*.cu))
+  ALL_OBJ   = $(OBJ) $(BUILD_DIR)/matrix-$(MTX_FMT).o $(CUDA_OBJ)
+else
+  ALL_OBJ   = $(OBJ) $(BUILD_DIR)/matrix-$(MTX_FMT).o
 endif
-
-  OBJ   +=  $(BUILD_DIR)/matrix-$(MTX_FMT).o
 
 c := ,
 clist = $(subst $(eval) ,$c,$(strip $1))
@@ -53,16 +56,22 @@ CompileFlags:
   Compiler: clang
 endef
 
-${TARGET}: $(BUILD_DIR) .clangd $(OBJ)
+# $(BUILD_DIR) is order-only: its mtime changes whenever an object is written,
+# which would otherwise force a pointless relink on every invocation.
+$(TARGET): $(ALL_OBJ) $(SCAMAC_LIB) | $(BUILD_DIR) .clangd
 	$(info ===>  LINKING  $(TARGET))
-	$(Q)${LD} ${LFLAGS} -o $(TARGET) $(OBJ) $(LIBS)
+	$(Q)${LD} ${LFLAGS} -o $(TARGET) $(ALL_OBJ) $(LIBS)
 
-$(BUILD_DIR)/%.o:  %.c $(MAKE_DIR)/include_$(TOOLCHAIN).mk $(MAKE_DIR)/include_SECTIMER.mk config.mk
+$(SCAMAC_LIB): $(SCAMAC_SRC) $(MAKE_DIR)/include_$(TOOLCHAIN).mk config.mk
+	$(info ===>  BUILD  $(SCAMAC_LIB))
+	$(Q)$(MAKE) --no-print-directory -C $(SCAMAC_DIR)
+
+$(BUILD_DIR)/%.o:  %.c $(MAKE_DIR)/include_$(TOOLCHAIN).mk $(MAKE_DIR)/include_SECTIMER.mk config.mk | $(BUILD_DIR)
 	$(info ===>  COMPILE  $@)
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) $< -o $@
 	$(Q)$(CC) $(CPPFLAGS) -MT $(@:.d=.o) -MM  $< > $(BUILD_DIR)/$*.d
 
-$(BUILD_DIR)/%.o: %.cu $(MAKE_DIR)/include_$(TOOLCHAIN).mk $(MAKE_DIR)/include_SECTIMER.mk config.mk
+$(BUILD_DIR)/%.o: %.cu $(MAKE_DIR)/include_$(TOOLCHAIN).mk $(MAKE_DIR)/include_SECTIMER.mk config.mk | $(BUILD_DIR)
 	$(info ===>  COMPILE CUDA  $@)
 	$(NVCC) -c $(NVCCFLAGS) $(DEFINES) $(OPTIONS) $(INCLUDES) $< -o $@
 
@@ -75,10 +84,12 @@ $(BUILD_DIR)/%.s:  %.c
 clean:
 	$(info ===>  CLEAN)
 	@rm -rf $(BUILD_DIR)
+	@$(MAKE) --no-print-directory -C $(SCAMAC_DIR) clean
 
 distclean:
 	$(info ===>  DIST CLEAN)
 	@rm -rf build
+	@$(MAKE) --no-print-directory -C $(SCAMAC_DIR) distclean
 	@rm -f sparseBench-*
 	@rm -f compile_commands.json
 	@rm -f tags .clangd out*
@@ -102,4 +113,4 @@ $(BUILD_DIR):
 .clangd:
 	$(file > .clangd,$(CLANGD_TEMPLATE))
 
--include $(OBJ:.o=.d)
+-include $(ALL_OBJ:.o=.d)

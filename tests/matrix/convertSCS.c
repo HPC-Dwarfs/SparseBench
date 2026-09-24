@@ -14,6 +14,18 @@ int test_convertSCS(void *args, const char *dataDir)
   /* TODO: validate under _MPI — single-rank only; no commInit/commDistributeMatrix (full matrix on one process). */
   int rank = 0;
   int size = 1;
+  int validFileCount = 0;
+  int skippedFiles   = 0;
+
+  /* The reported/ output directory is git-ignored, create it if missing */
+  char *pathToReported = malloc(strlen(dataDir) + strlen("reported/") + 1);
+  strcpy(pathToReported, dataDir);
+  strcat(pathToReported, "reported/");
+  if (ensureDir(pathToReported) != 0) {
+    free(pathToReported);
+    return 1;
+  }
+  free(pathToReported);
 
   // Open the directory
   char *pathToMatrices = malloc(strlen(dataDir) + strlen("testMatrices/") + 1);
@@ -52,7 +64,16 @@ int test_convertSCS(void *args, const char *dataDir)
 
       // Validate against expected data, if it exists
       FILE *fptr = fopen(pathToExpectedData, "r");
-      if (fptr) {
+      if (!fptr) {
+        // No reference data for this matrix/configuration: skip it instead of
+        // crashing on fclose(NULL) as before.
+        skippedFiles++;
+        free(pathToExpectedData);
+        free(pathToMatrix);
+        continue;
+      }
+      ++validFileCount;
+      {
 
         MMMatrix m;
         MMMatrixRead(&m, pathToMatrix);
@@ -72,9 +93,8 @@ int test_convertSCS(void *args, const char *dataDir)
         char *pathToReportedData = malloc(STR_LEN);
         BUILD_MATRIX_FILE_PATH(
             entry, "reported/", ".out", C_str, sigma_str, pathToReportedData);
-        FILE *reportedData = fopen(pathToReportedData, "w");
+        FILE *reportedData = xfopen(pathToReportedData, "w");
         if (reportedData == NULL) {
-          perror("Error opening reported data file");
           free(pathToReportedData);
           free(pathToExpectedData);
           free(pathToMatrix);
@@ -114,6 +134,16 @@ int test_convertSCS(void *args, const char *dataDir)
       free(pathToExpectedData);
       free(pathToMatrix);
     }
+  }
+
+  if (!validFileCount) {
+    fprintf(stderr,
+        "No valid files found in %s (%d skipped)\n",
+        pathToMatrices,
+        skippedFiles);
+    free(pathToMatrices);
+    closedir(dir);
+    return 1;
   }
 
   free(pathToMatrices);

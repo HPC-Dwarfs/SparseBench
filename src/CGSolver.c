@@ -18,98 +18,11 @@
 #include "timing.h"
 #include "vtype.h"
 
-static void initVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
-{
-#ifdef CRS
-  CG_UINT numRows = m->nr;
-  CG_UINT *rowPtr = m->rowPtr;
-
-  // Parallel init for NUMA first-touch — must use the same schedule the
-  // kernels use (OMP_SCHEDULE, kept as static for first-touch correctness).
-#pragma omp parallel for schedule(OMP_SCHEDULE)
-  for (int rowID = 0; rowID < numRows; rowID++) {
-
-    int nnzrow = rowPtr[rowID + 1] - rowPtr[rowID];
-    x[rowID]   = 0.0;
-
-    if (xexact != NULL) {
-      b[rowID]      = 27.0 - ((CG_FLOAT)(nnzrow - 1));
-      xexact[rowID] = 1.0;
-    } else {
-      b[rowID] = 1.0;
-    }
-  }
-#elif SCS
-  CG_UINT numRows       = m->nr;
-  CG_UINT c             = m->C;
-  CG_UINT *chunkPtr     = m->chunkPtr;
-  CG_UINT *chunkLens    = m->chunkLens;
-  CG_UINT *colInd       = m->colInd;
-  V_ELE *val            = m->val;
-  CG_UINT *oldToNewPerm = m->oldToNewPerm;
-
-  // Parallel init for NUMA first-touch — see CRS branch above.
-#pragma omp parallel for schedule(OMP_SCHEDULE)
-  for (int rowID = 0; rowID < numRows; rowID++) {
-    x[rowID] = 0.0;
-
-    // Map original row to new row position in SCS format
-    CG_UINT newRow     = oldToNewPerm[rowID];
-    CG_UINT chunkIdx   = newRow / c;
-    CG_UINT chunkRow   = newRow % c;
-    CG_UINT chunkStart = chunkPtr[chunkIdx];
-    CG_UINT rowLen     = chunkLens[chunkIdx];
-
-    // Count actual non-zero values in this row
-    int nnzrow = 0;
-    for (CG_UINT j = 0; j < rowLen; ++j) {
-      CG_UINT idx = chunkStart + j * c + chunkRow;
 #ifdef USE_COMPLEX
-      if (VREAL(val[idx]) != 0.0 || VIMAG(val[idx]) != 0.0) {
+#define CAST(v) VREAL((v))
 #else
-      if (val[idx] != 0.0) {
+#define CAST(v) v
 #endif
-        nnzrow++;
-      }
-    }
-
-    if (xexact != NULL) {
-      b[rowID]      = 27.0 - ((CG_FLOAT)(nnzrow - 1));
-      xexact[rowID] = 1.0;
-    } else {
-      b[rowID] = 1.0;
-    }
-  }
-#endif
-}
-
-//FIXME: Why is this not used anymore?
-// void solverCheckResidual(CommType *c, V_ELE *x, V_ELE *xexact, CG_UINT n)
-// {
-//   if (xexact == NULL) {
-//     return;
-//   }
-//
-//   CG_FLOAT residual = 0.0;
-//   V_ELE *v1         = x;
-//   V_ELE *v2         = xexact;
-//
-//   for (int i = 0; i < n; i++) {
-// #ifdef USE_COMPLEX
-//     double diff = VABS(v1[i] - v2[i]);
-// #else
-//     double diff = fabs(v1[i] - v2[i]);
-// #endif
-//     if (diff > residual)
-//       residual = diff;
-//   }
-//
-//   commReduction(&residual, MAX);
-//
-//   if (commIsMaster(c)) {
-//     printf("Difference between computed and exact  = %f\n", residual);
-//   }
-// }
 
 int solveCG(CommType *comm, Parameter *param, Matrix *A)
 {
@@ -133,7 +46,7 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
   V_ELE *xexact = d.xexact;
 
   NVTX_RANGE_PUSH_C("CG.setup", NVTX_C_CG);
-  initVectors(A, x, b, xexact);
+  solverInitVectors(A, x, b, xexact);
 
   // Permute colInd and vectors to SCS ordering so no per-iteration
   // permute_vector is needed inside the CG loop.
@@ -143,16 +56,7 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
   V_ELE *permTmp        = d.permTmp;
 
   // Permute b, x (and xexact) from original to SCS ordering
-  permute_vector(oldToNewPerm, b, permTmp, nrow);
-  memcpy(b, permTmp, nrow * sizeof(V_ELE));
-
-  permute_vector(oldToNewPerm, x, permTmp, nrow);
-  memcpy(x, permTmp, nrow * sizeof(V_ELE));
-
-  if (xexact != NULL) {
-    permute_vector(oldToNewPerm, xexact, permTmp, nrow);
-    memcpy(xexact, permTmp, nrow * sizeof(V_ELE));
-  }
+  solverPermuteVectors(oldToNewPerm, permTmp, nrow, x, b, xexact);
 #endif
   NVTX_RANGE_POP();
 
@@ -171,14 +75,12 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
 
   NVTX_RANGE_PUSH_C("CG.initResidual", NVTX_C_CG);
   PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, x, 0.0, x, p));
-  PROFILE(COMM, commExchange(comm, A->nr, p));
-
-  PROFILE(SPMVM, SPMVMFUNC(A, p, ap));
+  solverApplyA(comm, A, p, ap);
   PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, b, -1.0, ap, r));
   PROFILE(DDOT, DDOTFUNC(nrow, r, r, &rtrans));
   NVTX_RANGE_POP();
 
-  normr = sqrt(VREAL(rtrans));
+  normr = sqrt(CAST(rtrans));
   if (commIsMaster(comm)) {
     printf("Initial Residual = %E\n", normr);
   }
@@ -195,14 +97,13 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
       V_ELE beta = rtrans / oldrtrans;
       PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, r, beta, p, p));
     }
-    normr = sqrt(VREAL(rtrans));
+    normr = sqrt(CAST(rtrans));
 
     if (commIsMaster(comm) && (k % printFreq == 0 || k + 1 == itermax)) {
       printf("Iteration = %d Residual = %E\n", k, normr);
     }
 
-    PROFILE(COMM, commExchange(comm, A->nr, p));
-    PROFILE(SPMVM, SPMVMFUNC(A, p, ap));
+    solverApplyA(comm, A, p, ap);
 
     V_ELE alpha = 0.0;
     PROFILE(DDOT, DDOTFUNC(nrow, p, ap, &alpha));
@@ -218,14 +119,10 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
   }
 
 #ifdef SCS
-  permute_vector(newToOldPerm, x, permTmp, nrow);
-  memcpy(x, permTmp, nrow * sizeof(V_ELE));
-
-  if (xexact != NULL) {
-    permute_vector(newToOldPerm, xexact, permTmp, nrow);
-    memcpy(xexact, permTmp, nrow * sizeof(V_ELE));
-  }
+  solverPermuteVectors(newToOldPerm, permTmp, nrow, x, NULL, xexact);
 #endif
+
+  solverCheckResidual(comm, x, xexact, nrow);
 
   freeCGData(&d);
 

@@ -179,6 +179,10 @@ void matrixGenerateScamac(GMatrix *m, const char *matarg, int rank, int size)
   /* allocMatrix sizes the format conversion by nnz while the copy loop runs
    * to rowPtr[nr], so nnz is the exact fill-level cursor. */
   m->nnz = cursor;
+  // All three are set by reorderMatrixForOverlap after localization
+  m->rowLocalEnd   = NULL;
+  m->boundaryRows  = NULL;
+  m->nBoundaryRows = 0;
 
   /* Only needed for the profiler's flop accounting: exact on one rank, an
    * upper bound on several (nrow * maxnzrow), clamped where CG_UINT is 32
@@ -212,8 +216,8 @@ void matrixGenerateScamac(GMatrix *m, const char *matarg, int rank, int size)
   (void)rank;
   (void)size;
   fprintf(stderr,
-      "Matrix source '%s' requires ScaMaC support: rebuild with "
-      "ENABLE_SCAMAC=true (see mk/include_SCAMAC.mk).\n--> Abort.\n",
+      "Matrix source '%s' requires ScaMaC support, but this build lacks "
+      "-D_SCAMAC (see mk/include_SCAMAC.mk).\n--> Abort.\n",
       matarg);
   exit(EXIT_FAILURE);
 }

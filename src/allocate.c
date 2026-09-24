@@ -49,7 +49,7 @@ void *allocate(size_t alignment, size_t bytesize)
   return gpu_allocate(bytesize);
 #else
   int errorCode;
-  void *ptr;
+  void *ptr = NULL;
 
   errorCode = posix_memalign(&ptr, alignment, bytesize);
 

@@ -13,6 +13,7 @@
 #include "solver/sectionTimerTests.h"
 #include "solver/solverTestsSPMMV.h"
 #include "solver/solverTestsSPMV.h"
+#include "solver/solverTestsSPMVSplit.h"
 #include "solver/vectorOpsTests.h"
 
 #if defined(RUNTIME_BACKEND_IS_CUDA) || defined(RUNTIME_BACKEND_IS_HIP)
@@ -27,6 +28,7 @@ enum {
   RC_MATRIX_TESTS      = RC_BIT,
   RC_SOLVER_SPMV       = RC_BIT,
   RC_SOLVER_SPMMV      = RC_BIT,
+  RC_SOLVER_SPMV_SPLIT = RC_BIT,
   RC_CHEBFD_GERSHGORIN = RC_BIT,
   RC_CHEBFD_UNIT       = RC_BIT,
   RC_CHEBFD_STREAM     = RC_BIT,
@@ -46,6 +48,8 @@ static const struct {
 #ifdef SCS
   { "matrixTests",           matrixTests,           RC_MATRIX_TESTS      },
 #endif
+  // Self-contained and fast, so run it before the data-driven tests
+  { "solverTestsSPMVSplit",  solverTestsSPMVSplit,  RC_SOLVER_SPMV_SPLIT },
   { "solverTestsSPMV",       solverTestsSPMV,       RC_SOLVER_SPMV       },
   { "solverTestsSPMMV",      solverTestsSPMMV,      RC_SOLVER_SPMMV      },
   { "chebFDGershgorinTests", chebFDGershgorinTests, RC_CHEBFD_GERSHGORIN },
@@ -135,5 +139,7 @@ int main(int argc, char **argv)
     }
   }
 
-  return rc;
+  /* Exit statuses are 8 bit wide: never let a failure bit above bit 7 wrap
+   * around to a successful 0. */
+  return (rc & 0xff) != 0 ? (rc & 0xff) : (rc != 0);
 }

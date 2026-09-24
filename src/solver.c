@@ -113,7 +113,7 @@ void waxpby_stride(const CG_UINT n,
   }
 }
 
-// x/y are not restrict: MGS passes x == y to form a column norm.
+/* x/y are not restrict: MGS passes x == y to form a column norm. */
 void ddot_stride(const CG_UINT n,
     const V_ELE *x,
     const CG_UINT incx,

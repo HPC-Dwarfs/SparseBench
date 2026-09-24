@@ -16,38 +16,68 @@ typedef struct {
 } WorkType;
 
 double T[NUMREGIONS];
+size_t NCalls[NUMREGIONS];
 
-//NOTE: this is currently for every benchmark iterations!
+/* Regions that are compiled out of the current build have a walltime of zero;
+ * report a rate of zero for them instead of dividing by it. */
+static double rate(double amount, double time)
+{
+  return (time > 0.0) ? (1.0E-06 * amount / time) : 0.0;
+}
+
+/* Work per single call of each region (scaled by facWords/facFlops in
+ * profilerInit); the reported totals are this times NCalls, so solvers with
+ * different call patterns (CG, GMRES) are accounted correctly. */
 static WorkType Regions[NUMREGIONS] = {
-  { "waxpby:  ",  3, 6 },
-  { "spMVM:   ",  0, 2 },
-  { "spMMVM:   ", 5, 2 },
-  { "ddot:    ",  2, 4 },
-  { "comm:    ",  0, 0 }
+  { "waxpby:  ", 1, 2 },
+  { "spMVM:   ", 0, 2 },
+  { "spMMVM:  ", 5, 2 },
+  { "spMVM_l: ", 0, 2 },
+  { "spMVM_e: ", 0, 2 },
+  { "ddot:    ", 1, 2 },
+  { "comm:    ", 0, 0 },
+  { "commwait:", 0, 0 }
 };
 
 void profilerInit(size_t *facFlops, size_t *facWords)
 {
   LIKWID_MARKER_INIT;
+#ifdef _OPENMP
   _Pragma("omp parallel")
   {
     LIKWID_MARKER_REGISTER("WAXPBY");
     LIKWID_MARKER_REGISTER("SPMVM");
     LIKWID_MARKER_REGISTER("SPMMVM");
+    LIKWID_MARKER_REGISTER("SPMVM_LOCAL");
+    LIKWID_MARKER_REGISTER("SPMVM_EXT");
     LIKWID_MARKER_REGISTER("DDOT");
     LIKWID_MARKER_REGISTER("COMM");
+    LIKWID_MARKER_REGISTER("COMM_WAIT");
   }
+#else
+  LIKWID_MARKER_REGISTER("WAXPBY");
+  LIKWID_MARKER_REGISTER("SPMVM");
+  LIKWID_MARKER_REGISTER("SPMMVM");
+  LIKWID_MARKER_REGISTER("SPMVM_LOCAL");
+  LIKWID_MARKER_REGISTER("SPMVM_EXT");
+  LIKWID_MARKER_REGISTER("DDOT");
+  LIKWID_MARKER_REGISTER("COMM");
+  LIKWID_MARKER_REGISTER("COMM_WAIT");
+#endif
 
   for (int i = 0; i < NUMREGIONS; i++) {
-    T[i] = 0.0;
+    T[i]      = 0.0;
+    NCalls[i] = 0;
     Regions[i].flops *= facFlops[i];
     Regions[i].words *= facWords[i];
   }
 
-  Regions[SPMVM].words = facWords[SPMVM];
+  Regions[SPMVM].words       = facWords[SPMVM];
+  Regions[SPMVM_LOCAL].words = facWords[SPMVM_LOCAL];
+  Regions[SPMVM_EXT].words   = facWords[SPMVM_EXT];
 }
 
-void profilerPrint(CommType *c, int *seq, int numSeq, int iterations)
+void profilerPrint(CommType *c, int *seq, int numSeq)
 {
 
   if (c->size > 1) {
@@ -72,7 +102,10 @@ void profilerPrint(CommType *c, int *seq, int numSeq, int iterations)
       commWords += c->recvCounts[i];
     }
 
-    Regions[COMM].words = sizeof(CG_FLOAT) * commWords;
+    // The same volume moves either way; COMM measures pack+post, COMM_WAIT the
+    // part of the transfer that could not be hidden behind the local SpMV.
+    Regions[COMM].words      = sizeof(CG_FLOAT) * commWords;
+    Regions[COMM_WAIT].words = sizeof(CG_FLOAT) * commWords;
     int commVolume[c->size];
     MPI_Gather(&commWords, 1, MPI_INT, commVolume, 1, MPI_INT, 0, MPI_COMM_WORLD);
     double commTime[c->size];
@@ -83,8 +116,8 @@ void profilerPrint(CommType *c, int *seq, int numSeq, int iterations)
       printf("Function   avg MB/s  avg MFlop/s  Walltime(s) min, max, avg\n");
       for (int s = 0; s < numSeq; s++) {
         int j        = seq[s];
-        double bytes = (double)Regions[j].words * iterations;
-        double flops = (double)Regions[j].flops * iterations;
+        double bytes = (double)Regions[j].words * NCalls[j];
+        double flops = (double)Regions[j].flops * NCalls[j];
 
         /* Zero accumulated time is legitimate (e.g. `-i 1` never enters the
          * iteration loop); a rate would divide by zero and print inf/nan. */
@@ -100,8 +133,8 @@ void profilerPrint(CommType *c, int *seq, int numSeq, int iterations)
         }
         printf("%s%11.2f %11.2f %11.2f %11.2f %11.2f\n",
             Regions[j].label,
-            1.0E-06 * bytes / tavg[j],
-            1.0E-06 * flops / tavg[j],
+            rate(bytes, tavg[j]),
+            rate(flops, tavg[j]),
             tmin[j],
             tmax[j],
             tavg[j]);
@@ -138,8 +171,8 @@ void profilerPrint(CommType *c, int *seq, int numSeq, int iterations)
     printf("Function   Rate(MB/s)  Rate(MFlop/s)  Walltime(s)\n");
     for (int j = 0; j < numSeq; j++) {
       int id       = seq[j];
-      double bytes = (double)Regions[id].words * iterations;
-      double flops = (double)Regions[id].flops * iterations;
+      double bytes = (double)Regions[id].words * NCalls[id];
+      double flops = (double)Regions[id].flops * NCalls[id];
 
       /* See above: no recorded time means no rate, not inf/nan. */
       if (T[id] <= 0.0) {
@@ -148,8 +181,8 @@ void profilerPrint(CommType *c, int *seq, int numSeq, int iterations)
       }
       printf("%s%11.2f %11.2f %11.2f\n",
           Regions[id].label,
-          1.0E-06 * bytes / T[id],
-          1.0E-06 * flops / T[id],
+          rate(bytes, T[id]),
+          rate(flops, T[id]),
           T[id]);
     }
     printf(HLINE);
