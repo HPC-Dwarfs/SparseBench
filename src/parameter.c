@@ -104,6 +104,7 @@ void readParameter(Parameter *param, const char *filename)
       PARSE_KEY("nz", param->nz, atoi, NO_FLAG);
       PARSE_KEY("itermax", param->itermax, atoi, NO_FLAG);
       PARSE_KEY("eps", param->eps, atof, NO_FLAG);
+      PARSE_KEY("restart", param->restart, atoi, NO_FLAG);
       // NTS : `cheb_` prefix, populating the nested struct
       PARSE_KEY("cheb_a", param->cheb.a, atof, have_a = 1);
       PARSE_KEY("cheb_b", param->cheb.b, atof, have_b = 1);

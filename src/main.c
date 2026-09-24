@@ -328,13 +328,20 @@ int main(int argc, char **argv)
   } break;
 
   case GMRES:
-    numSeq          = 3;
-    int seqGmres[3] = { DDOT, WAXPBY, SPMVM };
-    seq             = seqGmres;
+    /* Same kernels and SpMV path (solverApplyA) as CG */
+#ifdef USE_OVERLAP_SPMVM
+    numSeq = 5;
+    seq    = seqCgOverlap;
+#else
+    numSeq = 3;
+    seq    = seqCgPlain;
+#endif
     if (commIsMaster(&comm)) {
       printf("Test type: GMRES\n");
     }
+    NVTX_RANGE_PUSH_C("Bench.GMRES", NVTX_C_CG);
     k = solveGMRES(&comm, &param, &sm);
+    NVTX_RANGE_POP();
     break;
 
   case CHEBFD: {
@@ -367,7 +374,7 @@ int main(int argc, char **argv)
   }
 
   if (rc == EXIT_SUCCESS && numSeq > 0) {
-    profilerPrint(&comm, seq, numSeq, k);
+    profilerPrint(&comm, seq, numSeq);
   }
   profilerFinalize();
   NVTX_RANGE_PUSH_C("Main.cleanup", NVTX_C_SETUP);

@@ -39,6 +39,7 @@ extern int BenchType;
   "  -w <int>   Width of block vector for SpMMV\n"                                       \
   "  -v         Enable verbose output\n"                                                 \
   "  -e <float>  Convergence criteria epsilon. Default 0.0.\n"                           \
+  "  -d <int>   GPU device index (multi-GPU nodes). Default 0.\n"                        \
   "  -r <int>   GMRES restart dimension. Default 30.\n"                                  \
   "ChebFD parameters are set via the parameter file (-f), not the CLI.\n"
 

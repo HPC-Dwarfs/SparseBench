@@ -196,12 +196,13 @@ To run the benchmark, call:
 | `-f`   | `<parameter file>` | Load options from a parameter file.                                               |
 | `-m`   | `<matrix>`         | Matrix source: MM file (`.mtx`/`.bmx`), `generate`/`generate7P` stencil, or `scamac:<argstring>`. |
 | `-c`   | `<file name>`      | Convert a Matrix Market file to binary matrix format (.bmx).                      |
-| `-t`   | `<bench type>`     | Benchmark type: `cg`, `spmv`, or `gmres`. Default: `cg`.                          |
+| `-t`   | `<bench type>`     | Benchmark type: `cg`, `spmv`, `spmmv`, `cheb`, or `gmres`. Default: `cg`.         |
 | `-x`   | `<int>`            | Size in x dimension for generated matrix (ignored if loading file). Default: 100. |
 | `-y`   | `<int>`            | Size in y dimension for generated matrix (ignored if loading file). Default: 100. |
 | `-z`   | `<int>`            | Size in z dimension for generated matrix (ignored if loading file). Default: 100. |
 | `-i`   | `<int>`            | Number of solver iterations. Default: 150.                                        |
 | `-e`   | `<float>`          | Convergence criteria epsilon. Default: 0.0.                                       |
+| `-r`   | `<int>`            | GMRES restart dimension (also `restart` in the parameter file). Default: 30.      |
 
 ### Matrix Input
 

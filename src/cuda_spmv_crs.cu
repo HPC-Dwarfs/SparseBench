@@ -21,7 +21,6 @@
 #define VEC_TILE 32
 #define ROW_TILE 8
 
-
 /* ------------------------------------------------------------------ */
 /*  CRS SpMV:  y = A * x                                             */
 /*  Each thread computes one row.                                     */
@@ -40,7 +39,7 @@ __global__ void kernel_spmv_crs(CG_UINT numRows,
   if (row >= numRows)
     return;
 
-  V_ELE sum = VCONST(0, 0);
+  V_ELE sum  = VCONST(0, 0);
   CG_UINT j0 = rowPtr[row] - elemBase;
   CG_UINT j1 = rowPtr[row + 1] - elemBase;
   for (CG_UINT j = j0; j < j1; j++) {
@@ -218,16 +217,8 @@ static void launchSpmmvPart(const GpuPartView *v, gpuStream_t stream, void *ua)
   unsigned vt  = vecTile(w);
   unsigned rt  = LAUNCH_THREADS / vt;
   dim3 grid((unsigned)((v->count + rt - 1) / rt), (unsigned)((w + vt - 1) / vt));
-  kernel_spmmv_crs<<<grid, dim3(vt, rt), 0, stream>>>(v->count,
-      w,
-      a->ld,
-      v->ptr,
-      v->elemBase,
-      v->rowBase,
-      v->colInd,
-      v->val,
-      a->x,
-      a->y);
+  kernel_spmmv_crs<<<grid, dim3(vt, rt), 0, stream>>>(
+      v->count, w, a->ld, v->ptr, v->elemBase, v->rowBase, v->colInd, v->val, a->x, a->y);
   GPU_CHECK_LAUNCH();
 }
 

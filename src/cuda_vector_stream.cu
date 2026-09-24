@@ -158,7 +158,8 @@ __global__ void kernel_vs_ritz_chunk(CG_UINT rows,
 /* res2[t] += sum_block partial[block][t]. One block per selected pair;
  * the threads stride over the row blocks and a fixed-shape shared
  * reduction folds them, so the order is deterministic. */
-__global__ void kernel_vs_ritz_accum(int nsel, CG_UINT nBlocks, const double *partial, double *res2)
+__global__ void kernel_vs_ritz_accum(
+    int nsel, CG_UINT nBlocks, const double *partial, double *res2)
 {
   __shared__ double sh[LIN_THREADS];
   int t    = blockIdx.x;
@@ -201,7 +202,7 @@ extern "C" GpuVectorStream *gpu_vstream_init(
   if (s == NULL) {
     return NULL;
   }
-  s->A  = A;
+  s->A       = A;
   s->nr      = A->nr;
   s->vecRows = matrixVecRows(A);
   s->NS      = NS;
@@ -394,10 +395,10 @@ static void colBlockPipeline(GpuVectorStream *s,
   const int nBlocks      = (int)((ncols + nb - 1) / nb);
 
   for (int i = 0; i < nBlocks; i++) {
-    int k       = i % GPU_VSTREAM_NSLOT;
-    CG_UINT v0  = (CG_UINT)i * nb;
-    CG_UINT w   = MIN(nb, ncols - v0);
-    size_t wB   = (size_t)w * sizeof(V_ELE);
+    int k      = i % GPU_VSTREAM_NSLOT;
+    CG_UINT v0 = (CG_UINT)i * nb;
+    CG_UINT w  = MIN(nb, ncols - v0);
+    size_t wB  = (size_t)w * sizeof(V_ELE);
 
     /* Slot k is free once its previous compute finished; first drain its
      * previous result to the host, then load the next input. */
@@ -457,11 +458,11 @@ static void filterSubBlock(GpuVectorStream *s, int k, CG_UINT w, void *vctx)
   gpuStream_t st     = s->computeStream;
   const Matrix *A    = s->A;
   CG_UINT ld         = (CG_UINT)s->nb;
-  V_ELE *X  = s->X[k];  /* constant input x, finally overwritten by p(A') x */
-  V_ELE *B1 = s->U;     /* b_{k+1} */
-  V_ELE *B2 = s->W;     /* b_{k+2}, becomes b_k */
+  V_ELE *X           = s->X[k];  /* constant input x, finally overwritten by p(A') x */
+  V_ELE *B1          = s->U;     /* b_{k+1} */
+  V_ELE *B2          = s->W;     /* b_{k+2}, becomes b_k */
   V_ELE two = VCONST(2.0, 0), mone = VCONST(-1.0, 0), zero = VCONST(0, 0);
-  int Np    = c->Np;
+  int Np = c->Np;
 
   /* k = Np: b = gc_Np x  (no matvec; b_{Np+1} = b_{Np+2} = 0) */
   size_t n   = (size_t)s->vecRows * (size_t)ld;
@@ -470,23 +471,62 @@ static void filterSubBlock(GpuVectorStream *s, int k, CG_UINT w, void *vctx)
       n, VCONST(c->gc[Np], 0), X, zero, X, zero, X, B1);
   GPU_CHECK_LAUNCH();
   /* k = Np-1: b = gc_k x + 2 A' b_{k+1}   (b_{k+2} = 0) */
-  gpu_launch_chebfd(A, st, B1, two * c->alpha, B1, two * c->beta, NULL, zero, B2, zero,
-      NULL, X, VCONST(c->gc[Np - 1], 0), w, ld);
+  gpu_launch_chebfd(A,
+      st,
+      B1,
+      two * c->alpha,
+      B1,
+      two * c->beta,
+      NULL,
+      zero,
+      B2,
+      zero,
+      NULL,
+      X,
+      VCONST(c->gc[Np - 1], 0),
+      w,
+      ld);
   /* Now B2 = b_{Np-1}, B1 = b_Np: swap so B1 = b_{k+1}, B2 = b_{k+2}. */
   V_ELE *t = B1;
   B1       = B2;
   B2       = t;
   /* k = Np-2 .. 1: b_k = gc_k x + 2 A' b_{k+1} - b_{k+2}, written over b_{k+2}. */
   for (int kk = Np - 2; kk >= 1; kk--) {
-    gpu_launch_chebfd(A, st, B1, two * c->alpha, B1, two * c->beta, B2, mone, B2, zero,
-        NULL, X, VCONST(c->gc[kk], 0), w, ld);
+    gpu_launch_chebfd(A,
+        st,
+        B1,
+        two * c->alpha,
+        B1,
+        two * c->beta,
+        B2,
+        mone,
+        B2,
+        zero,
+        NULL,
+        X,
+        VCONST(c->gc[kk], 0),
+        w,
+        ld);
     t  = B1;
     B1 = B2;
     B2 = t;
   }
   /* Result: x <- gc_0 x + A' b_1 - b_2  (y aliases r: row-local). */
-  gpu_launch_chebfd(A, st, B1, c->alpha, B1, c->beta, B2, mone, X, zero, NULL, X,
-      VCONST(c->gc[0], 0), w, ld);
+  gpu_launch_chebfd(A,
+      st,
+      B1,
+      c->alpha,
+      B1,
+      c->beta,
+      B2,
+      mone,
+      X,
+      zero,
+      NULL,
+      X,
+      VCONST(c->gc[0], 0),
+      w,
+      ld);
 }
 
 extern "C" void gpu_vstream_filter(GpuVectorStream *s,
@@ -531,7 +571,8 @@ extern "C" void gpu_vstream_spmmv(GpuVectorStream *s, const V_ELE *Yh, V_ELE *AY
 /* Compute callback: slot k holds rows [r0, r0+rows) of A (and B if given)
  * in rA[k] / rB[k] with leading dimension ld; results for write-back go
  * to rO[k] with leading dimension ldOut. */
-typedef void (*RowChunkFn)(GpuVectorStream *s, int k, CG_UINT r0, CG_UINT rows, void *ctx);
+typedef void (*RowChunkFn)(
+    GpuVectorStream *s, int k, CG_UINT r0, CG_UINT rows, void *ctx);
 
 /* Queue the D2H write-back of row chunk i from its slot's output buffer,
  * once that slot's compute has finished. */
@@ -608,7 +649,15 @@ static void gramChunk(GpuVectorStream *s, int k, CG_UINT r0, CG_UINT rows, void 
   (void)r0;
   const GramCtx *c = (const GramCtx *)vctx;
   const V_ELE *Bp  = c->useB ? s->rB[k] : s->rA[k];
-  launchGram(rows, c->m, s->rA[k], (CG_UINT)c->m, Bp, (CG_UINT)c->m, s->partial, s->G, 1,
+  launchGram(rows,
+      c->m,
+      s->rA[k],
+      (CG_UINT)c->m,
+      Bp,
+      (CG_UINT)c->m,
+      s->partial,
+      s->G,
+      1,
       s->computeStream);
 }
 
@@ -698,14 +747,17 @@ extern "C" void gpu_vstream_ritzResiduals(GpuVectorStream *s,
   ensurePartial(s, (size_t)maxBlocks * (size_t)nsel);
   GPU_CHECK_CALL(gpuMemcpy(
       s->B, evec, (size_t)m * (size_t)m * sizeof(double), gpuMemcpyHostToDevice));
-  GPU_CHECK_CALL(gpuMemcpy(s->eval, eval, (size_t)m * sizeof(double), gpuMemcpyHostToDevice));
-  GPU_CHECK_CALL(gpuMemcpy(s->sel, sel, (size_t)nsel * sizeof(int), gpuMemcpyHostToDevice));
+  GPU_CHECK_CALL(
+      gpuMemcpy(s->eval, eval, (size_t)m * sizeof(double), gpuMemcpyHostToDevice));
+  GPU_CHECK_CALL(
+      gpuMemcpy(s->sel, sel, (size_t)nsel * sizeof(int), gpuMemcpyHostToDevice));
   GPU_CHECK_CALL(gpuMemset(s->res2, 0, (size_t)nsel * sizeof(double)));
   ResCtx c;
   c.m    = m;
   c.nsel = nsel;
   rowChunkPipeline(s, Yh, AYh, (CG_UINT)m, NULL, 0, ritzChunk, &c);
-  GPU_CHECK_CALL(gpuMemcpy(res2, s->res2, (size_t)nsel * sizeof(double), gpuMemcpyDeviceToHost));
+  GPU_CHECK_CALL(
+      gpuMemcpy(res2, s->res2, (size_t)nsel * sizeof(double), gpuMemcpyDeviceToHost));
   NVTX_RANGE_POP();
 }
 
