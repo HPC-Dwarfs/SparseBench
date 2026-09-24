@@ -8,6 +8,7 @@
 
 #include "allocate.h"
 #include "matrix.h"
+#include "nvtx_marker.h"
 
 static inline int compareDesc(const void *a, const void *b)
 {
@@ -27,7 +28,47 @@ static inline int compareDescSCS(const void *a, const void *b)
     return 1; // Descending order
   if (pa->count > pb->count)
     return -1;
-  return 0; // Stable if equal
+  // Tie-break by ascending original index. since qsort is not stable.
+  if (pa->index < pb->index)
+    return -1;
+  if (pa->index > pb->index)
+    return 1;
+  return 0;
+}
+
+// used twice so made sense to make it as a function
+static CG_UINT maxRowLenInChunk(
+    const SellCSigmaPair *elemsPerRow, int chunkIdx, CG_UINT C)
+{
+  CG_UINT maxLength = 0;
+  for (CG_UINT j = 0; j < C; ++j) {
+    CG_UINT rowLen = elemsPerRow[chunkIdx * C + j].count;
+    if (rowLen > maxLength)
+      maxLength = rowLen;
+  }
+  return maxLength;
+}
+
+// Allocates the required matrix
+void allocMatrix(Matrix *m)
+{
+  m->chunkLens = (CG_UINT *)allocate(ARRAY_ALIGNMENT, m->nChunks * sizeof(CG_UINT));
+  m->chunkPtr  = (CG_UINT *)allocate(ARRAY_ALIGNMENT, (m->nChunks + 1) * sizeof(CG_UINT));
+  m->oldToNewPerm = (CG_UINT *)allocate(ARRAY_ALIGNMENT, m->nr * sizeof(CG_UINT));
+  m->newToOldPerm = (CG_UINT *)allocate(ARRAY_ALIGNMENT, m->nr * sizeof(CG_UINT));
+  m->colInd       = (CG_UINT *)allocate(ARRAY_ALIGNMENT, m->nElems * sizeof(CG_UINT));
+  m->val          = (V_ELE *)allocate(ARRAY_ALIGNMENT, m->nElems * sizeof(V_ELE));
+}
+
+// free the allocated data from allocnatrix
+void freeMatrix(Matrix *m)
+{
+  deallocate(m->chunkLens);
+  deallocate(m->chunkPtr);
+  deallocate(m->oldToNewPerm);
+  deallocate(m->newToOldPerm);
+  deallocate(m->colInd);
+  deallocate(m->val);
 }
 
 void convertMatrix(Matrix *m, GMatrix *im)
@@ -62,6 +103,7 @@ void convertMatrix(Matrix *m, GMatrix *im)
   }
 
   // Sort rows over a scope of sigma
+  NVTX_RANGE_PUSH_C("Convert.SCS.sigmaSort", NVTX_C_CONVERT);
   for (int i = 0; i < m->nrPadded; i += m->sigma) {
     int chunkStart = i;
     int chunkStop  = MIN(i + m->sigma, m->nrPadded);
@@ -75,44 +117,32 @@ void convertMatrix(Matrix *m, GMatrix *im)
     mergesort(&elemsPerRow[chunkStart], size, sizeof(SellCSigmaPair), compareDescSCS);
 #endif
   }
+  NVTX_RANGE_POP();
 
-  m->chunkLens = (CG_UINT *)allocate(ARRAY_ALIGNMENT, m->nChunks * sizeof(CG_UINT));
-  m->chunkPtr  = (CG_UINT *)allocate(ARRAY_ALIGNMENT, (m->nChunks + 1) * sizeof(CG_UINT));
-
-  CG_UINT currentChunkPtr = 0;
-
+  /* Derive the total element count (nElems) before allocating, since colInd
+   * and val are sized by it. */
+  CG_UINT nElems = 0;
   for (int i = 0; i < m->nChunks; ++i) {
-    // Note sure about this yet
-    // int chunkStart = elemsPerRow[i * m->C].count;
-    // int chunkStop = ((i * m->C + m->C) < m->nrPadded)
-    //               ? elemsPerRow[i * m->C + m->C].count
-    //               : elemsPerRow[m->nrPadded - 1].count;
-    // SellCSigmaPair chunkStart = elemsPerRow[i * m->C];
-    // SellCSigmaPair chunkStop  = elemsPerRow[MIN((i+1) * m->C, m->nrPadded - 1)];
+    nElems += maxRowLenInChunk(elemsPerRow, i, m->C) * m->C;
+  }
+  m->nElems = nElems;
+  m->beta   = (double)m->nnz / (double)m->nElems;
 
-    // int size                  = chunkStop.index - chunkStart.index;
+  /* Allocate every format-specific array in one place. */
+  allocMatrix(m);
 
-    // Collect longest row in chunk as chunk length
-    CG_UINT maxLength = 0;
-    for (int j = 0; j < m->C; ++j) {
-      CG_UINT rowLenth = elemsPerRow[i * m->C + j].count;
-      if (rowLenth > maxLength)
-        maxLength = rowLenth;
+  /* Publish the chunk layout (chunkLens + chunkPtr). */
+  {
+    CG_UINT currentChunkPtr = 0;
+    for (int i = 0; i < m->nChunks; ++i) {
+      m->chunkLens[i] = maxRowLenInChunk(elemsPerRow, i, m->C);
+      m->chunkPtr[i]  = currentChunkPtr;
+      currentChunkPtr += m->chunkLens[i] * m->C;
     }
-
-    // Collect chunk data to arrays
-    m->chunkLens[i] = (CG_UINT)maxLength;
-    m->chunkPtr[i]  = (CG_UINT)currentChunkPtr;
-    currentChunkPtr += m->chunkLens[i] * m->C;
+    m->chunkPtr[m->nChunks] = currentChunkPtr;
   }
 
-  // Account for final chunk
-  m->nElems               = currentChunkPtr;
-  m->beta                 = (double)m->nnz / (double)m->nElems;
-  m->chunkPtr[m->nChunks] = (CG_UINT)m->nElems;
-
   // Construct permutation vector
-  m->oldToNewPerm = (CG_UINT *)allocate(ARRAY_ALIGNMENT, m->nr * sizeof(CG_UINT));
   for (int i = 0; i < m->nrPadded; ++i) {
     CG_UINT oldRow = elemsPerRow[i].index;
     if (oldRow < m->nr)
@@ -120,7 +150,6 @@ void convertMatrix(Matrix *m, GMatrix *im)
   }
 
   // Construct inverse permutation vector
-  m->newToOldPerm = (CG_UINT *)allocate(ARRAY_ALIGNMENT, m->nr * sizeof(CG_UINT));
   for (int i = 0; i < m->nr; ++i) {
 #ifdef VERBOSE
     // Sanity check for common error
@@ -135,10 +164,6 @@ void convertMatrix(Matrix *m, GMatrix *im)
 #endif
     m->newToOldPerm[m->oldToNewPerm[i]] = (CG_UINT)i;
   }
-
-  // Now that chunk data is collected, fill with matrix data
-  m->colInd = (CG_UINT *)allocate(ARRAY_ALIGNMENT, m->nElems * sizeof(CG_UINT));
-  m->val    = (V_ELE *)allocate(ARRAY_ALIGNMENT, m->nElems * sizeof(V_ELE));
 
 // Initialize defaults (essential for padded elements)
 #pragma omp parallel for schedule(OMP_SCHEDULE)
@@ -157,6 +182,7 @@ void convertMatrix(Matrix *m, GMatrix *im)
     rowLocalElemCount[i] = 0;
   }
 
+  NVTX_RANGE_PUSH_C("Convert.SCS.scatter", NVTX_C_CONVERT);
   for (int i = 0; i < m->nr; i++) {
 
     int rowOld = i;
@@ -192,6 +218,7 @@ void convertMatrix(Matrix *m, GMatrix *im)
       ++rowLocalElemCount[row];
     }
   }
+  NVTX_RANGE_POP();
 
   deallocate(elemsPerRow);
   deallocate(rowLocalElemCount);
@@ -373,10 +400,10 @@ void spMMVM(Matrix *m, const DMatrix *x, DMatrix *y)
 
     int chunkOffset = chunkPtr[i];
     for (int j = 0; j < chunkLens[i]; ++j) {
-      // NOTE: SIMD should be applied here
       for (int k = 0; k < C; ++k) {
         CG_UINT col = colInd[chunkOffset + j * C + k];
         V_ELE a     = val[chunkOffset + j * C + k];
+#pragma omp simd
         for (int v = 0; v < numVecs; ++v) {
           tmp[k * numVecs + v] += a * x->entries[col * numVecs + v];
         }
@@ -384,8 +411,141 @@ void spMMVM(Matrix *m, const DMatrix *x, DMatrix *y)
     }
 
     for (int j = 0; j < C; ++j) {
+#pragma omp simd
       for (int v = 0; v < numVecs; ++v) {
         y->entries[(i * C + j) * numVecs + v] = tmp[j * numVecs + v];
+      }
+    }
+  }
+}
+
+/* Fused y = cA*(m*x) + cP*p + cQ*q, evaluated per chunk without ever writing
+ * m*x out to memory. q may be NULL (with cQ ignored). */
+void spMMVMFused(Matrix *m,
+    const DMatrix *x,
+    V_ELE cA,
+    const DMatrix *p,
+    V_ELE cP,
+    const DMatrix *q,
+    V_ELE cQ,
+    DMatrix *y)
+{
+  CG_UINT *colInd    = m->colInd;
+  V_ELE *val         = m->val;
+
+  CG_UINT numChunks  = m->nChunks;
+  CG_UINT C          = m->C;
+  CG_UINT *chunkPtr  = m->chunkPtr;
+  CG_UINT *chunkLens = m->chunkLens;
+
+  CG_UINT numVecs    = x->nc; // number of vectors in the block
+
+#pragma omp parallel for schedule(OMP_SCHEDULE)
+  for (int i = 0; i < numChunks; ++i) {
+    V_ELE tmp[C * numVecs];
+    for (int j = 0; j < C * numVecs; ++j) {
+      tmp[j] = 0.0;
+    }
+
+    int chunkOffset = chunkPtr[i];
+    for (int j = 0; j < chunkLens[i]; ++j) {
+      for (int k = 0; k < C; ++k) {
+        CG_UINT col = colInd[chunkOffset + j * C + k];
+        V_ELE a     = val[chunkOffset + j * C + k];
+#pragma omp simd
+        for (int v = 0; v < numVecs; ++v) {
+          tmp[k * numVecs + v] += a * x->entries[col * numVecs + v];
+        }
+      }
+    }
+
+    for (int j = 0; j < C; ++j) {
+      CG_UINT row     = (CG_UINT)i * C + (CG_UINT)j;
+      V_ELE *y_row    = &y->entries[row * numVecs];
+      V_ELE *p_row    = &p->entries[row * numVecs];
+      V_ELE *chunkAcc = &tmp[j * numVecs];
+      if (q != NULL) {
+        V_ELE *q_row = &q->entries[row * numVecs];
+#pragma omp simd
+        for (int v = 0; v < numVecs; ++v) {
+          y_row[v] = cA * chunkAcc[v] + cP * p_row[v] + cQ * q_row[v];
+        }
+      } else {
+#pragma omp simd
+        for (int v = 0; v < numVecs; ++v) {
+          y_row[v] = cA * chunkAcc[v] + cP * p_row[v];
+        }
+      }
+    }
+  }
+}
+
+/* ChebFD recurrence step, fully fused: computes the new filter term
+ * y = cA*(m*w) + cP*w + cQ*q (same shape as spMMVMFused with p=w), and in the
+ * same chunk pass accumulates it into the running polynomial sum,
+ * x += gc*y. y may alias q (row-local, in-place recurrence update); x is a
+ * separate accumulator block. Saves the extra read of y that a follow-up
+ * waxpby(x, gc, y, x) would otherwise need, since y is still local here. */
+void chebfdOp(Matrix *m,
+    const DMatrix *w,
+    V_ELE cA,
+    V_ELE cP,
+    const DMatrix *q,
+    V_ELE cQ,
+    DMatrix *y,
+    V_ELE gc,
+    DMatrix *x)
+{
+  CG_UINT *colInd    = m->colInd;
+  V_ELE *val         = m->val;
+
+  CG_UINT numChunks  = m->nChunks;
+  CG_UINT C          = m->C;
+  CG_UINT *chunkPtr  = m->chunkPtr;
+  CG_UINT *chunkLens = m->chunkLens;
+
+  CG_UINT numVecs    = w->nc; // number of vectors in the block
+
+#pragma omp parallel for schedule(OMP_SCHEDULE)
+  for (int i = 0; i < numChunks; ++i) {
+    V_ELE tmp[C * numVecs];
+    for (int j = 0; j < C * numVecs; ++j) {
+      tmp[j] = 0.0;
+    }
+
+    int chunkOffset = chunkPtr[i];
+    for (int j = 0; j < chunkLens[i]; ++j) {
+      for (int k = 0; k < C; ++k) {
+        CG_UINT col = colInd[chunkOffset + j * C + k];
+        V_ELE a     = val[chunkOffset + j * C + k];
+#pragma omp simd
+        for (int v = 0; v < numVecs; ++v) {
+          tmp[k * numVecs + v] += a * w->entries[col * numVecs + v];
+        }
+      }
+    }
+
+    for (int j = 0; j < C; ++j) {
+      CG_UINT row     = (CG_UINT)i * C + (CG_UINT)j;
+      V_ELE *w_row    = &w->entries[row * numVecs];
+      V_ELE *y_row    = &y->entries[row * numVecs];
+      V_ELE *x_row    = &x->entries[row * numVecs];
+      V_ELE *chunkAcc = &tmp[j * numVecs];
+      if (q != NULL) {
+        V_ELE *q_row = &q->entries[row * numVecs];
+#pragma omp simd
+        for (int v = 0; v < numVecs; ++v) {
+          V_ELE t  = cA * chunkAcc[v] + cP * w_row[v] + cQ * q_row[v];
+          y_row[v] = t;
+          x_row[v] += gc * t;
+        }
+      } else {
+#pragma omp simd
+        for (int v = 0; v < numVecs; ++v) {
+          V_ELE t  = cA * chunkAcc[v] + cP * w_row[v];
+          y_row[v] = t;
+          x_row[v] += gc * t;
+        }
       }
     }
   }

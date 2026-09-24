@@ -2,28 +2,144 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #ifdef SCS
 #include "matrix/matrixTests.h"
 #endif
+#include "solver/chebFDGershgorinTests.h"
+#include "solver/chebFDStreamTests.h"
+#include "solver/chebFDUnitTests.h"
+#include "solver/sectionTimerTests.h"
 #include "solver/solverTestsSPMMV.h"
 #include "solver/solverTestsSPMV.h"
+#include "solver/solverTestsSPMVSplit.h"
+#include "solver/vectorOpsTests.h"
 
 #if defined(RUNTIME_BACKEND_IS_CUDA) || defined(RUNTIME_BACKEND_IS_HIP)
 #include "../src/cuda/cuda_kernels.h"
 #endif
 
+// genrator for test codes. One bit per suite.
+enum { RC_BIT_BASE = __COUNTER__ };
+#define RC_BIT (1 << (__COUNTER__ - RC_BIT_BASE - 1))
+
+enum {
+  RC_MATRIX_TESTS      = RC_BIT,
+  RC_SOLVER_SPMV       = RC_BIT,
+  RC_SOLVER_SPMMV      = RC_BIT,
+  RC_SOLVER_SPMV_SPLIT = RC_BIT,
+  RC_CHEBFD_GERSHGORIN = RC_BIT,
+  RC_CHEBFD_UNIT       = RC_BIT,
+  RC_CHEBFD_STREAM     = RC_BIT,
+  RC_SECTIMER          = RC_BIT,
+  RC_VECTOR_OPS        = RC_BIT,
+  // Not a test suite failure
+  RC_UNSUPPORTED_MPI = RC_BIT,
+};
+
+// Every suite runs even if an earlier one fails, so rc is the OR of the bits
+// of all failing suites and a single run can name all of them at once.
+static const struct {
+  const char *name;
+  int (*run)(int, char **);
+  int bit;
+} suites[] = {
+#ifdef SCS
+  { "matrixTests",           matrixTests,           RC_MATRIX_TESTS      },
+#endif
+  // Self-contained and fast, so run it before the data-driven tests
+  { "solverTestsSPMVSplit",  solverTestsSPMVSplit,  RC_SOLVER_SPMV_SPLIT },
+  { "solverTestsSPMV",       solverTestsSPMV,       RC_SOLVER_SPMV       },
+  { "solverTestsSPMMV",      solverTestsSPMMV,      RC_SOLVER_SPMMV      },
+  { "chebFDGershgorinTests", chebFDGershgorinTests, RC_CHEBFD_GERSHGORIN },
+  { "chebFDUnitTests",       chebFDUnitTests,       RC_CHEBFD_UNIT       },
+  { "chebFDStreamTests",     chebFDStreamTests,     RC_CHEBFD_STREAM     },
+  { "sectionTimerTests",     sectionTimerTests,     RC_SECTIMER          },
+  { "vectorOpsTests",        vectorOpsTests,        RC_VECTOR_OPS        },
+};
+static const size_t numSuites = sizeof(suites) / sizeof(suites[0]);
+
+static void usage(const char *prog)
+{
+  printf("Usage: %s [-h|--help] [-l|--list] [SUITE ...]\n", prog);
+  printf("  With no SUITE arguments every suite runs. Otherwise only the named\n");
+  printf("  suites run, in the order given. Available suites:\n");
+  for (size_t i = 0; i < numSuites; i++) {
+    printf("    %s\n", suites[i].name);
+  }
+}
+
+// TODO : add tests for MPI cases
 int main(int argc, char **argv)
 {
+#if defined(_MPI)
+  printf("tests do not support MPI recompile with ENABLE_MPI ?= false\n");
+  return RC_UNSUPPORTED_MPI;
+#endif
+
+  // Resolve the selection before touching the GPU or filesystem so that
+  // --help / --list / a typo exit cleanly and instantly.
+  int selected[sizeof(suites) / sizeof(suites[0])] = { 0 };
+  int anySelected                                  = 0;
+  for (int a = 1; a < argc; a++) {
+    if (!strcmp(argv[a], "-h") || !strcmp(argv[a], "--help")) {
+      usage(argv[0]);
+      return 0;
+    }
+    if (!strcmp(argv[a], "-l") || !strcmp(argv[a], "--list")) {
+      for (size_t i = 0; i < numSuites; i++) {
+        printf("%s\n", suites[i].name);
+      }
+      return 0;
+    }
+    size_t i = 0;
+    for (; i < numSuites; i++) {
+      if (!strcmp(argv[a], suites[i].name)) {
+        selected[i] = 1;
+        anySelected = 1;
+        break;
+      }
+    }
+    if (i == numSuites) {
+      fprintf(stderr, "Unknown test suite: %s\n\n", argv[a]);
+      usage(argv[0]);
+      return 1;
+    }
+  }
+
 #if defined(RUNTIME_BACKEND_IS_CUDA) || defined(RUNTIME_BACKEND_IS_HIP)
   gpu_init(0);
 #endif
-#ifdef SCS
-  matrixTests(argc, argv);
-#endif
-  solverTestsSPMV(argc, argv);
-  solverTestsSPMMV(argc, argv);
+
+  // since tests needs a reported folder it made sense to centralize it here
+  mkdir("./data", 0775);
+  mkdir("./data/reported", 0775);
+
+  int rc = 0;
+  for (size_t i = 0; i < numSuites; i++) {
+    if (anySelected && !selected[i]) {
+      continue;
+    }
+    printf("===>  RUNNING SUITE %s\n", suites[i].name);
+    rc |= suites[i].run(argc, argv) ? suites[i].bit : 0;
+  }
 #if defined(RUNTIME_BACKEND_IS_CUDA) || defined(RUNTIME_BACKEND_IS_HIP)
   gpu_finalize();
 #endif
-  return 0;
+
+  if (rc == 0) {
+    printf("===>  ALL TESTS PASSED (rc=0)\n");
+  } else {
+    printf("===>  TESTS FAILED (rc=%d)\n", rc);
+    for (size_t i = 0; i < numSuites; i++) {
+      if (rc & suites[i].bit) {
+        printf("        FAILED: %s (rc bit %d)\n", suites[i].name, suites[i].bit);
+      }
+    }
+  }
+
+  /* Exit statuses are 8 bit wide: never let a failure bit above bit 7 wrap
+   * around to a successful 0. */
+  return (rc & 0xff) != 0 ? (rc & 0xff) : (rc != 0);
 }

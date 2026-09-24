@@ -13,6 +13,7 @@
 #define MAX_NUM_THREADS 128
 #define gettid() syscall(SYS_gettid)
 
+#ifdef _OPENMP
 static int getProcessorID(cpu_set_t *cpu_set)
 {
   int processorId;
@@ -25,7 +26,6 @@ static int getProcessorID(cpu_set_t *cpu_set)
   return processorId;
 }
 
-#ifdef _OPENMP
 int affinity_getProcessorId()
 {
   cpu_set_t cpu_set;

@@ -9,6 +9,7 @@
 #include <stddef.h>
 
 #ifdef LIKWID_PERFMON
+#ifdef _OPENMP
 #define PROFILE(tag, call)                                                               \
   _Pragma("omp parallel")                                                                \
   {                                                                                      \
@@ -21,6 +22,14 @@
   {                                                                                      \
     LIKWID_MARKER_STOP(#tag);                                                            \
   }
+#else
+#define PROFILE(tag, call)                                                               \
+  LIKWID_MARKER_START(#tag);                                                             \
+  ts = getTimeStamp();                                                                   \
+  call;                                                                                  \
+  T[tag] += (getTimeStamp() - ts);                                                       \
+  LIKWID_MARKER_STOP(#tag);
+#endif
 #else /* LIKWID_PERFMON */
 #define PROFILE(tag, call)                                                               \
   ts = getTimeStamp();                                                                   \
@@ -28,7 +37,17 @@
   T[tag] += (getTimeStamp() - ts);
 #endif /* LIKWID_PERFMON */
 
-typedef enum { WAXPBY = 0, SPMVM, SPMMVM, DDOT, COMM, NUMREGIONS } regions;
+typedef enum {
+  WAXPBY = 0,
+  SPMVM,
+  SPMMVM,
+  SPMVM_LOCAL,
+  SPMVM_EXT,
+  DDOT,
+  COMM, // packing and posting the halo exchange
+  COMM_WAIT, // exposed (non-overlapped) halo exchange time
+  NUMREGIONS
+} RegionsType;
 
 extern double T[NUMREGIONS];
 extern void profilerInit(size_t *facFlops, size_t *facWords);

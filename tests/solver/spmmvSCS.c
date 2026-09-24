@@ -34,6 +34,16 @@ int test_spmmvSCS(void *args, const char *dataDir)
   int size           = 1;
   int validFileCount = 0;
 
+  /* The reported/ output directory is git-ignored, create it if missing */
+  char *pathToReported = malloc(strlen(dataDir) + strlen("reported/") + 1);
+  strcpy(pathToReported, dataDir);
+  strcat(pathToReported, "reported/");
+  if (ensureDir(pathToReported) != 0) {
+    free(pathToReported);
+    return 1;
+  }
+  free(pathToReported);
+
   // Open the directory
   char *pathToMatrices = malloc(strlen(dataDir) + strlen("testMatrices/") + 1);
   strcpy(pathToMatrices, dataDir);
@@ -118,8 +128,8 @@ int test_spmmvSCS(void *args, const char *dataDir)
         DMatrix x = { .nr = A.nc, .nc = test_blockwidth, .entries = NULL };
         DMatrix y = { .nr = A.nr, .nc = test_blockwidth, .entries = NULL };
 
-        x.entries = (CG_FLOAT *)allocate(ARRAY_ALIGNMENT, x.nr * x.nc * sizeof(CG_FLOAT));
-        y.entries = (CG_FLOAT *)allocate(ARRAY_ALIGNMENT, y.nr * y.nc * sizeof(CG_FLOAT));
+        x.entries = (V_ELE *)allocate(ARRAY_ALIGNMENT, x.nr * x.nc * sizeof(V_ELE));
+        y.entries = (V_ELE *)allocate(ARRAY_ALIGNMENT, y.nr * y.nc * sizeof(V_ELE));
 
         // Initialize x: sequential values for real entries, 0 for padding
         for (int i = 0; i < (x.nr * x.nc); ++i) {
@@ -129,16 +139,16 @@ int test_spmmvSCS(void *args, const char *dataDir)
           y.entries[i] = (CG_FLOAT)0.0;
         }
 
-// NOTE : since we switch the vectors around mkaing them bigger is necessary to
-// prevent accesssing garbage data
+// NOTE : since we switch the vectors around making them bigger is necessary to
+// prevent accessing garbage data
 #ifdef SCS
         DMatrix x_perm = { .nr = vectorSize, .nc = test_blockwidth, .entries = NULL };
         DMatrix y_perm = { .nr = vectorSize, .nc = test_blockwidth, .entries = NULL };
 
-        x_perm.entries = (CG_FLOAT *)allocate(
-            ARRAY_ALIGNMENT, x_perm.nr * x_perm.nc * sizeof(CG_FLOAT));
-        y_perm.entries = (CG_FLOAT *)allocate(
-            ARRAY_ALIGNMENT, y_perm.nr * y_perm.nc * sizeof(CG_FLOAT));
+        x_perm.entries =
+            (V_ELE *)allocate(ARRAY_ALIGNMENT, x_perm.nr * x_perm.nc * sizeof(V_ELE));
+        y_perm.entries =
+            (V_ELE *)allocate(ARRAY_ALIGNMENT, y_perm.nr * y_perm.nc * sizeof(V_ELE));
 
         // Zero-fill permuted vectors (essential for padded rows)
         for (int i = 0; i < (x_perm.nr * x_perm.nc); ++i)
@@ -178,9 +188,19 @@ int test_spmmvSCS(void *args, const char *dataDir)
         snprintf(out_file_name, sizeof(out_file_name), "_spmmv_x_%d.out", repeat_count);
         BUILD_MATRIX_FILE_PATH(
             entry, "reported/", out_file_name, C_str, sigma_str, pathToReportedData);
-        FILE *reportedData = fopen(pathToReportedData, "w");
+        FILE *reportedData = xfopen(pathToReportedData, "w");
 
         printf("pathToReportedData = %s\n", pathToReportedData);
+
+        if (reportedData == NULL) {
+          fclose(fptr);
+          free(pathToReportedData);
+          free(pathToExpectedData);
+          free(pathToMatrix);
+          free(pathToMatrices);
+          closedir(dir);
+          return 1;
+        }
 
         dumpDMatrix_impl(&y, reportedData);
         fclose(reportedData);
@@ -199,6 +219,11 @@ int test_spmmvSCS(void *args, const char *dataDir)
         deallocate(x_perm.entries);
         deallocate(y_perm.entries);
 #endif
+
+        freeMatrix(&A);
+        freeGMatrix(&gm);
+        freeMMMatrix(&m);
+
         if (diff_result) {
           fclose(fptr);
           free(pathToExpectedData);
