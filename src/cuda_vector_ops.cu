@@ -93,8 +93,7 @@ extern "C" void gpu_waxpby3_sync(CG_UINT n,
 __device__ static inline void atomicAddV(V_ELE *dst, V_ELE v)
 {
 #ifdef USE_COMPLEX
-  typename V_ELE::value_type *c =
-      reinterpret_cast<typename V_ELE::value_type *>(dst);
+  typename V_ELE::value_type *c = reinterpret_cast<typename V_ELE::value_type *>(dst);
   atomicAdd(c + 0, VREAL(v));
   atomicAdd(c + 1, VIMAG(v));
 #else
@@ -135,7 +134,8 @@ static void ensure_ddot_result(void)
  * updates *result_d in device memory. Asynchronous — no host transfer,
  * no sync. Callers consume *result_d with subsequent device work or an
  * explicit copy; gpu_ddot / gpu_ddot_sync do the latter. */
-extern "C" void gpu_ddot_device(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *result_d)
+extern "C" void gpu_ddot_device(
+    CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *result_d)
 {
   int threads = DDOT_THREADS;
   int blocks  = (int)((n + threads - 1) / threads);
@@ -154,7 +154,8 @@ extern "C" void gpu_ddot(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *resul
   ensure_ddot_result();
   gpu_ddot_device(n, x, y, g_ddot_result_d);
 
-  GPU_CHECK_CALL(gpuMemcpy(result, g_ddot_result_d, sizeof(V_ELE), gpuMemcpyDeviceToHost));
+  GPU_CHECK_CALL(
+      gpuMemcpy(result, g_ddot_result_d, sizeof(V_ELE), gpuMemcpyDeviceToHost));
 }
 
 /* ------------------------------------------------------------------ */
@@ -217,7 +218,7 @@ extern "C" void gpu_set_alloc_type(AllocType type)
 
 static void *allocDispatch(size_t bytes, int device)
 {
-  void *ptr = NULL;
+  void *ptr      = NULL;
   g_alloc_locked = 1;
   if (device && g_alloc_type == ALLOC_EXPLICIT) {
     GPU_CHECK_CALL(gpuMalloc(&ptr, bytes));
@@ -311,6 +312,7 @@ extern "C" void gpu_ddot_sync(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *
 
   /* gpuMemcpy is synchronous w.r.t. the host, so it both waits for the
    * kernel above and delivers the scalar — no separate DeviceSynchronize. */
-  GPU_CHECK_CALL(gpuMemcpy(result, g_ddot_result_d, sizeof(V_ELE), gpuMemcpyDeviceToHost));
+  GPU_CHECK_CALL(
+      gpuMemcpy(result, g_ddot_result_d, sizeof(V_ELE), gpuMemcpyDeviceToHost));
   NVTX_RANGE_POP();
 }

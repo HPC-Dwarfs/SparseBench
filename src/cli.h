@@ -40,9 +40,10 @@ extern int BenchType;
   "  -v         Enable verbose output\n"                                                 \
   "  -e <float>  Convergence criteria epsilon. Default 0.0.\n"                           \
   "  -d <int>   GPU device index (multi-GPU nodes). Default 0.\n"                        \
+  "  -r <int>   GMRES restart dimension. Default 30.\n"                                  \
   "ChebFD parameters are set via the parameter file (-f), not the CLI.\n"
 
-#define BASE_ARGS_COMMON "hc:t:f:m:x:y:z:i:e:w:v:d:"
+#define BASE_ARGS_COMMON "hc:t:f:m:x:y:z:i:e:w:r:v:d:"
 
 #ifdef SCS
 

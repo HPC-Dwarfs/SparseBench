@@ -26,6 +26,7 @@
 #endif
 
 extern int solveCG(CommType *comm, Parameter *param, Matrix *m);
+extern int solveGMRES(CommType *comm, Parameter *param, Matrix *m);
 
 typedef struct {
   V_ELE *r;
@@ -40,6 +41,15 @@ typedef struct {
 // centralized methods to allocate and deallocate
 extern void allocCGData(CGData *d, Matrix *m, bool useXexact);
 extern void freeCGData(CGData *d);
+
+// helpers shared by the iterative solvers (solverCommon.c)
+extern void solverInitVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact);
+extern void solverCheckResidual(CommType *c, V_ELE *x, V_ELE *xexact, CG_UINT n);
+extern void solverApplyA(CommType *comm, Matrix *A, V_ELE *p, V_ELE *ap);
+#ifdef SCS
+extern void solverPermuteVectors(
+    const CG_UINT *perm, V_ELE *tmp, CG_UINT n, V_ELE *x, V_ELE *b, V_ELE *xexact);
+#endif
 
 // extern void solverCheckResidual(Solver* s, Comm* c);
 extern void spMVM(Matrix *m, const V_ELE *restrict x, V_ELE *restrict y);
