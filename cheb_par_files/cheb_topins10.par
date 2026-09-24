@@ -1,0 +1,10 @@
+filename scamac:TopIns,Lx=10,Ly=10,Lz=10
+cheb_lam_lo 2.89
+cheb_lam_hi 2.95
+cheb_Np 1500
+cheb_NS 64
+eps 1e-8
+itermax 30
+# GPU build only: search space is streamed from pinned host memory in
+# sub-blocks of cheb_nb columns, ignored by the CPU build.
+cheb_nb 16

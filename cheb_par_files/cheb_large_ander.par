@@ -1,0 +1,10 @@
+filename scamac:Anderson,Lx=32,Ly=32,Lz=32,ranpot=1.5
+cheb_lam_lo -0.01
+cheb_lam_hi 0.01
+cheb_Np 6000
+cheb_NS 256
+eps 1e-6
+itermax 5
+# GPU build only: search space is streamed from pinned host memory in
+# sub-blocks of cheb_nb columns, ignored by the CPU build.
+cheb_nb 16
