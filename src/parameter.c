@@ -11,27 +11,51 @@
 #include "cli.h" // BenchType / CHEBFD, for the ChebFD section of printParameter
 #define MAXLINE 4096
 
-void setParameterFilename(Parameter *param, const char *filename)
+/* Replace the owned string *target with a copy of value. */
+void setParameterString(char **target, const char *value)
 {
-  char *dup = strdup(filename);
+  char *dup = strdup(value);
   if (dup == NULL) {
-    fprintf(stderr, "Error: could not copy matrix name '%s'\n", filename);
+    fprintf(stderr, "Error: could not copy parameter value '%s'\n", value);
     exit(EXIT_FAILURE);
   }
-  free(param->filename);
-  param->filename = dup;
+  free(*target);
+  *target = dup;
+}
+
+void setParameterFilename(Parameter *param, const char *filename)
+{
+  setParameterString(&param->filename, filename);
 }
 
 void freeParameter(Parameter *param)
 {
   free(param->filename);
   param->filename = NULL;
+  free(param->solverVariant);
+  param->solverVariant = NULL;
+  free(param->gmresOrtho);
+  param->gmresOrtho = NULL;
+}
+
+/* Stopping mode as shown in the parameter echo and the result summary. */
+void formatStopMode(const Parameter *param, char *buf, size_t len)
+{
+  if (param->eps > 0.0) {
+    snprintf(buf, len, "relative tolerance %g (itermax %d)", param->eps, param->itermax);
+  } else {
+    snprintf(buf, len, "fixed (itermax %d)", param->itermax);
+  }
 }
 
 void initParameter(Parameter *param)
 {
-  param->filename = NULL;
+  param->filename      = NULL;
+  param->solverVariant = NULL;
+  param->gmresOrtho    = NULL;
   setParameterFilename(param, "generate");
+  setParameterString(&param->solverVariant, "standard");
+  setParameterString(&param->gmresOrtho, "mgs");
   param->nx         = 100;
   param->ny         = 100;
   param->nz         = 100;
@@ -99,6 +123,12 @@ void readParameter(Parameter *param, const char *filename)
       if (strcmp(tok, "filename") == 0) {
         setParameterFilename(param, val);
       }
+      if (strcmp(tok, "solver_variant") == 0) {
+        setParameterString(&param->solverVariant, val);
+      }
+      if (strcmp(tok, "gmres_ortho") == 0) {
+        setParameterString(&param->gmresOrtho, val);
+      }
       PARSE_KEY("nx", param->nx, atoi, NO_FLAG);
       PARSE_KEY("ny", param->ny, atoi, NO_FLAG);
       PARSE_KEY("nz", param->nz, atoi, NO_FLAG);
@@ -159,7 +189,15 @@ void printParameter(Parameter *param)
   printf("\tny: %d\n", param->ny);
   printf("\tnz: %d\n", param->nz);
   printf("\tMax iterations: %d\n", param->itermax);
-  printf("\tepsilon (stopping tolerance) : %f\n", param->eps);
+  char stopMode[128];
+  formatStopMode(param, stopMode, sizeof(stopMode));
+  printf("\tStop mode: %s\n", stopMode);
+  if (BenchType == CG || BenchType == GMRES) {
+    printf("\tSolver variant: %s\n", param->solverVariant);
+  }
+  if (BenchType == GMRES) {
+    printf("\tGMRES orthogonalization: %s\n", param->gmresOrtho);
+  }
   printf("\tBlock width: %d\n", param->blockwidth);
   printf("\tGMRES restart dimension: %d\n", param->restart);
 #ifdef SCS

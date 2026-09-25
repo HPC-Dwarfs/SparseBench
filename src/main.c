@@ -94,6 +94,17 @@ int main(int argc, char **argv)
   commInit(&comm, argc, argv);
   initParameter(&param);
   parseArguments(&comm, &param, argc, argv);
+
+  /* Resolve the variant names only now: -t may follow -a, and a parameter file
+   * may set the variant before -t is seen. Fail before any matrix setup. */
+  SolverSelection sel;
+  char selMsg[512];
+  if (!solverResolve(BenchType, &param, &sel, selMsg, sizeof(selMsg))) {
+    commAbort(&comm, selMsg);
+  }
+  if (BenchType == GMRES) {
+    gmresSetOrtho(sel.ortho->ortho);
+  }
   NVTX_INIT();
 #if defined(RUNTIME_BACKEND_IS_CUDA) || defined(RUNTIME_BACKEND_IS_HIP)
   /* Multi-rank GPU runs are not supported yet and must not be silently wrong:
@@ -212,16 +223,16 @@ int main(int argc, char **argv)
   int k = 0;
   /* Storage for the profiler region sequences at function scope: seq is
    * handed to profilerPrint() after the switch, so pointing it at arrays
-   * declared inside the switch would dangle (stack-use-after-scope). */
-  int seqCgPlain[3]   = { DDOT, WAXPBY, SPMVM };
-  int seqCgOverlap[5] = { DDOT, WAXPBY, SPMVM_LOCAL, SPMVM_EXT, COMM_WAIT };
-  int seqSpmvMpi[2]   = { SPMVM, COMM };
-  int seqSpmv[1]      = { SPMVM };
-  int seqSpmmv[1]     = { SPMMVM };
+   * declared inside the switch would dangle (stack-use-after-scope). The
+   * CG/GMRES sequences come from the selected variant. */
+  int seqSpmvMpi[2] = { SPMVM, COMM };
+  int seqSpmv[1]    = { SPMVM };
+  int seqSpmmv[1]   = { SPMMVM };
 
-  int numSeq          = 0;
-  int *seq            = NULL;
-  int rc              = EXIT_SUCCESS;
+  int numSeq        = 0;
+  const int *seq    = NULL;
+  int rc            = EXIT_SUCCESS;
+  SolverResult result;
 
   /* Input vectors must span nc (locals + externals after localization); output
    * vectors must span nrPadded because the SCS kernels also write the padded
@@ -236,19 +247,16 @@ int main(int argc, char **argv)
 
   switch (BenchType) {
   case CG:
-#ifdef USE_OVERLAP_SPMVM
-    numSeq = 5;
-    seq    = seqCgOverlap;
-#else
-    numSeq = 3;
-    seq    = seqCgPlain;
-#endif
+    numSeq = sel.variant->numProfSeq;
+    seq    = sel.variant->profSeq;
     if (commIsMaster(&comm)) {
       printf("Test type: CG\n");
     }
+    solverPrintSelection(&comm, &sel, &param);
     NVTX_RANGE_PUSH_C("Bench.CG", NVTX_C_CG);
-    k = solveCG(&comm, &param, &sm);
+    k = sel.variant->solve(&comm, &param, &sm, &result);
     NVTX_RANGE_POP();
+    solverPrintResult(&comm, &sel, &param, &result);
     break;
 
   case SPMV: {
@@ -327,20 +335,16 @@ int main(int argc, char **argv)
   } break;
 
   case GMRES:
-    /* Same kernels and SpMV path (solverApplyA) as CG */
-#ifdef USE_OVERLAP_SPMVM
-    numSeq = 5;
-    seq    = seqCgOverlap;
-#else
-    numSeq = 3;
-    seq    = seqCgPlain;
-#endif
+    numSeq = sel.variant->numProfSeq;
+    seq    = sel.variant->profSeq;
     if (commIsMaster(&comm)) {
       printf("Test type: GMRES\n");
     }
+    solverPrintSelection(&comm, &sel, &param);
     NVTX_RANGE_PUSH_C("Bench.GMRES", NVTX_C_CG);
-    k = solveGMRES(&comm, &param, &sm);
+    k = sel.variant->solve(&comm, &param, &sm, &result);
     NVTX_RANGE_POP();
+    solverPrintResult(&comm, &sel, &param, &result);
     break;
 
   case CHEBFD: {

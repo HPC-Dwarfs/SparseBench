@@ -104,6 +104,12 @@ void parseArguments(CommType *comm, Parameter *param, int argc, char **argv)
     case 'e':
       param->eps = strtod(optarg, NULL);
       break;
+    case 'a':
+      setParameterString(&param->solverVariant, optarg);
+      break;
+    case 'o':
+      setParameterString(&param->gmresOrtho, optarg);
+      break;
     case 'w':
       param->blockwidth = (int)strtol(optarg, NULL, INT_BASE);
       break;

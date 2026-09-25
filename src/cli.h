@@ -38,12 +38,14 @@ extern int BenchType;
   "  -i <int>   Number of solver iterations. Default 150.\n"                             \
   "  -w <int>   Width of block vector for SpMMV\n"                                       \
   "  -v         Enable verbose output\n"                                                 \
-  "  -e <float>  Convergence criteria epsilon. Default 0.0.\n"                           \
+  "  -e <float>  Relative tolerance ||r||/||b||; 0 = fixed iterations. Default 0.0.\n"   \
+  "  -a <name>  Solver variant for cg and gmres. Default standard.\n"                    \
+  "  -o <name>  GMRES orthogonalization scheme. Default mgs.\n"                          \
   "  -d <int>   GPU device index (multi-GPU nodes). Default 0.\n"                        \
   "  -r <int>   GMRES restart dimension. Default 30.\n"                                  \
   "ChebFD parameters are set via the parameter file (-f), not the CLI.\n"
 
-#define BASE_ARGS_COMMON "hc:t:f:m:x:y:z:i:e:w:r:v:d:"
+#define BASE_ARGS_COMMON "hc:t:f:m:x:y:z:i:e:a:o:w:r:v:d:"
 
 #ifdef SCS
 

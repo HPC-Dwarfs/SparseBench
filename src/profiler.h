@@ -59,6 +59,6 @@ typedef enum {
 extern double T[NUMREGIONS];
 extern size_t NCalls[NUMREGIONS];
 extern void profilerInit(size_t *facFlops, size_t *facWords);
-extern void profilerPrint(CommType *c, int *seq, int numSeq);
+extern void profilerPrint(CommType *c, const int *seq, int numSeq);
 extern void profilerFinalize(void);
 #endif // __PROFILER_H
