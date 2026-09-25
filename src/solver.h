@@ -4,6 +4,9 @@
  * license that can be found in the LICENSE file. */
 #ifndef __SOLVER_H_
 #define __SOLVER_H_
+#include <stdbool.h>
+#include <stddef.h>
+
 #include "comm.h"
 #include "parameter.h"
 #include "util.h"
@@ -25,8 +28,93 @@
 #define OVERLAP_NUDGE_CHUNKS 8
 #endif
 
-extern int solveCG(CommType *comm, Parameter *param, Matrix *m);
-extern int solveGMRES(CommType *comm, Parameter *param, Matrix *m);
+/* Why an iterative solver stopped. The last three are the exact-solution guards
+ * and can end a run early in either stopping mode. */
+typedef enum {
+  STOP_CONVERGED = 0, // ||r||/||b|| <= eps (tolerance mode)
+  STOP_ITERMAX,       // itermax iterations performed
+  STOP_BREAKDOWN,     // GMRES lucky breakdown: the Krylov space is invariant
+  STOP_EXACT,         // residual became exactly zero
+  STOP_ZERO_RHS       // ||b|| == 0, x = 0 returned without iterating
+} StopReason;
+
+/* Filled by every solver variant, printed by solverPrintResult. */
+typedef struct {
+  int iterations;
+  StopReason reason;
+  double solveTime;        // iteration loop only
+  CG_FLOAT relResEstimate; // recurrence / Givens estimate, relative to ||b||
+  CG_FLOAT relResTrue;     // ||b - Ax|| / ||b||, computed after the timer
+  CG_FLOAT errMax;         // max|x - xexact|, < 0 if there is no exact solution
+} SolverResult;
+
+typedef int (*SolveFn)(CommType *, Parameter *, Matrix *, SolverResult *);
+
+/* Build configurations a variant supports. The configuration of the current
+ * build is derived from the build macros in solverRegistry.c. */
+enum {
+  SUPPORT_REAL    = 1u << 0,
+  SUPPORT_COMPLEX = 1u << 1,
+  SUPPORT_CRS     = 1u << 2,
+  SUPPORT_SCS     = 1u << 3,
+  SUPPORT_CCRS    = 1u << 4,
+  SUPPORT_CPU     = 1u << 5,
+  SUPPORT_GPU     = 1u << 6,
+};
+#define SUPPORT_ALL_FORMATS (SUPPORT_CRS | SUPPORT_SCS | SUPPORT_CCRS)
+#define SUPPORT_ALL_BACKENDS (SUPPORT_CPU | SUPPORT_GPU)
+
+typedef struct {
+  const char *name;
+  SolveFn solve;
+  unsigned supports;  // SUPPORT_* bitmask
+  const int *profSeq; // profiler regions the variant executes
+  int numProfSeq;
+} SolverVariant;
+
+/* GMRES orthogonalization of V[j+1] against V[0..j]. Writes column j of the
+ * Hessenberg matrix to h[0..j+1], stores the norm of the unorthogonalized
+ * column in *colNorm (for the breakdown test) and returns h_{j+1,j}. V[j+1] is
+ * left unnormalized. */
+typedef CG_FLOAT (*OrthoFn)(
+    CG_UINT nrow, V_ELE **V, int j, CG_FLOAT *h, CG_FLOAT *colNorm);
+
+typedef struct {
+  const char *name;
+  OrthoFn ortho;
+  unsigned supports;
+} OrthoVariant;
+
+/* Resolved selection for one run. ortho is NULL for solvers other than GMRES. */
+typedef struct {
+  const char *solverName;
+  const SolverVariant *variant;
+  const OrthoVariant *ortho;
+} SolverSelection;
+
+// solver variant registry (solverRegistry.c)
+extern const SolverVariant *solverVariants(int benchType, int *count);
+extern const OrthoVariant *solverOrthoVariants(int *count);
+extern const SolverVariant *solverFindVariant(int benchType, const char *name);
+extern const OrthoVariant *solverFindOrtho(const char *name);
+extern void solverVariantNames(int benchType, char *buf, size_t len);
+extern void solverOrthoNames(char *buf, size_t len);
+extern bool solverCheckSupport(
+    const char *what, unsigned supports, char *msg, size_t len);
+extern bool solverResolve(
+    int benchType, const Parameter *param, SolverSelection *sel, char *msg, size_t len);
+extern void solverPrintSelection(
+    CommType *comm, const SolverSelection *sel, const Parameter *param);
+extern void solverPrintResult(CommType *comm,
+    const SolverSelection *sel,
+    const Parameter *param,
+    const SolverResult *res);
+
+extern int solveCG(CommType *comm, Parameter *param, Matrix *m, SolverResult *res);
+extern int solveGMRES(CommType *comm, Parameter *param, Matrix *m, SolverResult *res);
+extern void gmresSetOrtho(OrthoFn ortho);
+extern CG_FLOAT gmresOrthoMGS(
+    CG_UINT nrow, V_ELE **V, int j, CG_FLOAT *h, CG_FLOAT *colNorm);
 
 typedef struct {
   V_ELE *r;
@@ -44,8 +132,24 @@ extern void freeCGData(CGData *d);
 
 // helpers shared by the iterative solvers (solverCommon.c)
 extern void solverInitVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact);
-extern void solverCheckResidual(CommType *c, V_ELE *x, V_ELE *xexact, CG_UINT n);
+/* Scales the rhs (and the exact solution) solverInitVectors produces. Test
+ * hook for the zero-rhs guard and the scaling invariance; default 1. */
+extern void solverSetRhsScale(CG_FLOAT scale);
+extern CG_FLOAT solverCheckResidual(CommType *c, V_ELE *x, V_ELE *xexact, CG_UINT n);
 extern void solverApplyA(CommType *comm, Matrix *A, V_ELE *p, V_ELE *ap);
+/* r = b - A*x, returns ||r||. r must span the SpMV input size, tmp the output
+ * size. */
+extern CG_FLOAT solverResidualNorm(
+    CommType *comm, Matrix *A, V_ELE *x, const V_ELE *b, V_ELE *r, V_ELE *tmp);
+
+typedef struct {
+  CG_FLOAT normb;  // ||b|| over all ranks
+  CG_FLOAT absTol; // eps*||b|| in tolerance mode, -1 in fixed mode
+  bool zeroRhs;    // ||b|| == 0
+} SolverStop;
+
+extern SolverStop solverStopInit(
+    CommType *comm, const V_ELE *b, CG_UINT nrow, double eps);
 #ifdef SCS
 extern void solverPermuteVectors(
     const CG_UINT *perm, V_ELE *tmp, CG_UINT n, V_ELE *x, V_ELE *b, V_ELE *xexact);

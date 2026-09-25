@@ -11,6 +11,7 @@
 #include "solver/chebFDStreamTests.h"
 #include "solver/chebFDUnitTests.h"
 #include "solver/sectionTimerTests.h"
+#include "solver/solverTestsIterative.h"
 #include "solver/solverTestsSPMMV.h"
 #include "solver/solverTestsSPMV.h"
 #include "solver/solverTestsSPMVSplit.h"
@@ -34,6 +35,7 @@ enum {
   RC_CHEBFD_STREAM     = RC_BIT,
   RC_SECTIMER          = RC_BIT,
   RC_VECTOR_OPS        = RC_BIT,
+  RC_SOLVER_ITERATIVE  = RC_BIT,
   // Not a test suite failure
   RC_UNSUPPORTED_MPI = RC_BIT,
 };
@@ -57,6 +59,7 @@ static const struct {
   { "chebFDStreamTests",     chebFDStreamTests,     RC_CHEBFD_STREAM     },
   { "sectionTimerTests",     sectionTimerTests,     RC_SECTIMER          },
   { "vectorOpsTests",        vectorOpsTests,        RC_VECTOR_OPS        },
+  { "solverTestsIterative",  solverTestsIterative,  RC_SOLVER_ITERATIVE  },
 };
 static const size_t numSuites = sizeof(suites) / sizeof(suites[0]);
 

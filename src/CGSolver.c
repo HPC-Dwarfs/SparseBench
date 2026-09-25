@@ -24,10 +24,9 @@
 #define CAST(v) v
 #endif
 
-int solveCG(CommType *comm, Parameter *param, Matrix *A)
+int solveCG(CommType *comm, Parameter *param, Matrix *A, SolverResult *res)
 {
   NVTX_RANGE_PUSH_C("CG.solve", NVTX_C_CG);
-  CG_FLOAT eps   = (CG_FLOAT)param->eps;
   int itermax    = param->itermax;
 
   CG_UINT nrow   = A->nr;
@@ -60,6 +59,8 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
 #endif
   NVTX_RANGE_POP();
 
+  SolverStop stop = solverStopInit(comm, b, nrow, param->eps);
+
   CG_FLOAT normr  = 0.0;
   V_ELE rtrans    = 0.0;
   V_ELE oldrtrans = 0.0;
@@ -73,56 +74,96 @@ int solveCG(CommType *comm, Parameter *param, Matrix *A)
   }
   double timeStart, timeStop, ts;
 
-  NVTX_RANGE_PUSH_C("CG.initResidual", NVTX_C_CG);
-  PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, x, 0.0, x, p));
-  solverApplyA(comm, A, p, ap);
-  PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, b, -1.0, ap, r));
-  PROFILE(DDOT, DDOTFUNC(nrow, r, r, &rtrans));
-  NVTX_RANGE_POP();
+  int k             = 0;
+  StopReason reason = STOP_ITERMAX;
 
-  normr = sqrt(CAST(rtrans));
-  if (commIsMaster(comm)) {
-    printf("Initial Residual = %E\n", normr);
-  }
+  if (stop.zeroRhs) {
+    /* x = 0 is the exact solution; x is still zero from solverInitVectors. */
+    reason    = STOP_ZERO_RHS;
+    timeStart = timeStop = getTimeStamp();
+  } else {
+    NVTX_RANGE_PUSH_C("CG.initResidual", NVTX_C_CG);
+    PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, x, 0.0, x, p));
+    solverApplyA(comm, A, p, ap);
+    PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, b, -1.0, ap, r));
+    PROFILE(DDOT, DDOTFUNC(nrow, r, r, &rtrans));
+    NVTX_RANGE_POP();
 
-  int k;
-  timeStart = getTimeStamp();
-  NVTX_RANGE_PUSH_C("CG.iterations", NVTX_C_CG);
-  for (k = 1; k < itermax && normr > eps; k++) {
-    if (k == 1) {
-      PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, r, 0.0, r, p));
-    } else {
+    normr = sqrt(CAST(rtrans));
+    if (commIsMaster(comm)) {
+      printf("Initial Residual = %E\n", normr);
+    }
+
+    /* k counts completed iterations (one SpMV each). rtrans is always the
+     * squared norm of the current residual, so the stopping tests below cost
+     * no extra reduction. */
+    timeStart = getTimeStamp();
+    NVTX_RANGE_PUSH_C("CG.iterations", NVTX_C_CG);
+    for (;;) {
+      if (rtrans == 0.0) {
+        /* Exact solution: beta would be 0/0 */
+        reason = STOP_EXACT;
+        break;
+      }
+      if (normr <= stop.absTol) {
+        reason = STOP_CONVERGED;
+        break;
+      }
+      if (k == itermax) {
+        reason = STOP_ITERMAX;
+        break;
+      }
+
+      if (k == 0) {
+        PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, r, 0.0, r, p));
+      } else {
+        V_ELE beta = rtrans / oldrtrans;
+        PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, r, beta, p, p));
+      }
+
+      solverApplyA(comm, A, p, ap);
+
+      V_ELE pAp = 0.0;
+      PROFILE(DDOT, DDOTFUNC(nrow, p, ap, &pAp));
+      if (pAp == 0.0) {
+        commAbort(
+            comm, "CG: p'Ap == 0 with a non-zero residual, the matrix is not SPD\n");
+      }
+      V_ELE alpha = rtrans / pAp;
+      PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, x, alpha, p, x));
+      PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, r, -alpha, ap, r));
+      k++;
+
       oldrtrans = rtrans;
       PROFILE(DDOT, DDOTFUNC(nrow, r, r, &rtrans));
-      V_ELE beta = rtrans / oldrtrans;
-      PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, r, beta, p, p));
+      normr = sqrt(CAST(rtrans));
+
+      if (commIsMaster(comm) && (k % printFreq == 0 || k == itermax)) {
+        printf("Iteration = %d Residual = %E\n", k, normr);
+      }
     }
-    normr = sqrt(CAST(rtrans));
-
-    if (commIsMaster(comm) && (k % printFreq == 0 || k + 1 == itermax)) {
-      printf("Iteration = %d Residual = %E\n", k, normr);
-    }
-
-    solverApplyA(comm, A, p, ap);
-
-    V_ELE alpha = 0.0;
-    PROFILE(DDOT, DDOTFUNC(nrow, p, ap, &alpha));
-    alpha = rtrans / alpha;
-    PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, x, alpha, p, x));
-    PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, r, -alpha, ap, r));
+    NVTX_RANGE_POP();
+    timeStop = getTimeStamp();
   }
-  NVTX_RANGE_POP();
-  timeStop = getTimeStamp();
 
-  if (commIsMaster(comm)) {
-    printf("Solution performed %d iterations and took %.2fs\n", k, timeStop - timeStart);
+  res->iterations     = k;
+  res->reason         = reason;
+  res->solveTime      = timeStop - timeStart;
+  res->relResEstimate = stop.zeroRhs ? 0.0 : normr / stop.normb;
+
+  /* Verification, outside the timed region. p spans the SpMV input size, ap
+   * the output size; neither is needed any more. */
+  if (stop.zeroRhs) {
+    res->relResTrue = 0.0;
+  } else {
+    res->relResTrue = solverResidualNorm(comm, A, x, b, p, ap) / stop.normb;
   }
 
 #ifdef SCS
   solverPermuteVectors(newToOldPerm, permTmp, nrow, x, NULL, xexact);
 #endif
 
-  solverCheckResidual(comm, x, xexact, nrow);
+  res->errMax = solverCheckResidual(comm, x, xexact, nrow);
 
   freeCGData(&d);
 

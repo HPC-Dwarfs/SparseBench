@@ -77,7 +77,7 @@ void profilerInit(size_t *facFlops, size_t *facWords)
   Regions[SPMVM_EXT].words   = facWords[SPMVM_EXT];
 }
 
-void profilerPrint(CommType *c, int *seq, int numSeq)
+void profilerPrint(CommType *c, const int *seq, int numSeq)
 {
 
   if (c->size > 1) {

@@ -17,6 +17,13 @@
 
 /* Helpers shared by the iterative solvers (CG, GMRES). */
 
+static CG_FLOAT rhsScale = 1.0;
+
+void solverSetRhsScale(CG_FLOAT scale)
+{
+  rhsScale = scale;
+}
+
 void solverInitVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
 {
 #if defined(CRS) || defined(CCRS)
@@ -32,10 +39,10 @@ void solverInitVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
     x[rowID]       = 0.0;
 
     if (xexact != NULL) {
-      b[rowID]      = 27.0 - ((CG_FLOAT)(nnzrow - 1));
-      xexact[rowID] = 1.0;
+      b[rowID]      = rhsScale * (27.0 - ((CG_FLOAT)(nnzrow - 1)));
+      xexact[rowID] = rhsScale;
     } else {
-      b[rowID] = 1.0;
+      b[rowID] = rhsScale;
     }
   }
 #elif SCS
@@ -73,10 +80,10 @@ void solverInitVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
     }
 
     if (xexact != NULL) {
-      b[rowID]      = 27.0 - ((CG_FLOAT)(nnzrow - 1));
-      xexact[rowID] = 1.0;
+      b[rowID]      = rhsScale * (27.0 - ((CG_FLOAT)(nnzrow - 1)));
+      xexact[rowID] = rhsScale;
     } else {
-      b[rowID] = 1.0;
+      b[rowID] = rhsScale;
     }
   }
 #endif
@@ -98,13 +105,54 @@ void solverPermuteVectors(
 }
 #endif
 
-/* End-to-end sanity check of the solution. Cheap, and the only thing that
+/* ||b|| and the absolute threshold both solvers compare their residual norm
+ * against. One reduction, done before the solve timer starts. In fixed mode
+ * absTol is -1, which no norm can undercut. */
+SolverStop solverStopInit(CommType *comm, const V_ELE *b, CG_UINT nrow, double eps)
+{
+  (void)comm;
+  SolverStop s;
+  V_ELE bb;
+
+  DDOTFUNC(nrow, b, b, &bb);
+#ifdef USE_COMPLEX
+  s.normb = sqrt(VREAL(bb));
+#else
+  s.normb = sqrt(bb);
+#endif
+  s.zeroRhs = (s.normb == 0.0);
+  s.absTol  = (eps > 0.0) ? (CG_FLOAT)eps * s.normb : -1.0;
+  return s;
+}
+
+CG_FLOAT solverResidualNorm(
+    CommType *comm, Matrix *A, V_ELE *x, const V_ELE *b, V_ELE *r, V_ELE *tmp)
+{
+  double ts;
+  CG_UINT nrow = A->nr;
+  V_ELE rtmp;
+
+  PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, x, 0.0, x, r));
+  solverApplyA(comm, A, r, tmp);
+  PROFILE(WAXPBY, WAXBYFUNC(nrow, 1.0, b, -1.0, tmp, r));
+  PROFILE(DDOT, DDOTFUNC(nrow, r, r, &rtmp));
+
+#ifdef USE_COMPLEX
+  return sqrt(VREAL(rtmp));
+#else
+  return sqrt(rtmp);
+#endif
+}
+
+/* End-to-end sanity check of the solution: returns max|x - xexact| over all
+ * ranks, or -1 if there is no exact solution. Cheap, and the only thing that
  * catches a halo contribution that silently went missing - which is exactly the
  * failure mode of a broken communication/computation overlap. */
-void solverCheckResidual(CommType *c, V_ELE *x, V_ELE *xexact, CG_UINT n)
+CG_FLOAT solverCheckResidual(CommType *c, V_ELE *x, V_ELE *xexact, CG_UINT n)
 {
+  (void)c;
   if (xexact == NULL) {
-    return;
+    return -1.0;
   }
 
   CG_FLOAT residual = 0.0;
@@ -123,10 +171,7 @@ void solverCheckResidual(CommType *c, V_ELE *x, V_ELE *xexact, CG_UINT n)
   }
 
   commReduction(&residual, MAX);
-
-  if (commIsMaster(c)) {
-    printf("Difference between computed and exact  = %E\n", residual);
-  }
+  return residual;
 }
 
 /* USE_OVERLAP_SPMVM and OVERLAP_NUDGE_CHUNKS come from solver.h so that the

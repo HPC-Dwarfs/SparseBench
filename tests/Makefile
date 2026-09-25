@@ -51,7 +51,7 @@ MOD1_SOURCES=$(MOD1)/convertSCS.c $(MOD1)/matrixTests.c
 else
 MOD1_SOURCES=
 endif
-MOD2_SOURCES=$(MOD2)/spmvSCS.c $(MOD2)/spmmvSCS.c $(MOD2)/solverTestsSPMV.c $(MOD2)/solverTestsSPMMV.c $(MOD2)/solverTestsSPMVSplit.c $(MOD2)/chebFDGershgorinTests.c $(MOD2)/chebFDUnitTests.c $(MOD2)/chebFDStreamTests.c $(MOD2)/sectionTimerTests.c $(MOD2)/vectorOpsTests.c
+MOD2_SOURCES=$(MOD2)/spmvSCS.c $(MOD2)/spmmvSCS.c $(MOD2)/solverTestsSPMV.c $(MOD2)/solverTestsSPMMV.c $(MOD2)/solverTestsSPMVSplit.c $(MOD2)/chebFDGershgorinTests.c $(MOD2)/chebFDUnitTests.c $(MOD2)/chebFDStreamTests.c $(MOD2)/sectionTimerTests.c $(MOD2)/vectorOpsTests.c $(MOD2)/solverTestsIterative.c
 
 OBJECTS := $(TEST_BUILD)/runTests.o $(sort $(patsubst %.c,$(TEST_BUILD)/%.o,$(MOD1_SOURCES) $(MOD2_SOURCES)))
 

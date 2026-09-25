@@ -5,6 +5,8 @@
 #ifndef __PARAMETER_H_
 #define __PARAMETER_H_
 
+#include <stddef.h>
+
 #include "allocate.h" /* AllocType */
 
 // NTS : CHEB_FD params
@@ -25,7 +27,9 @@ typedef struct {
   char *filename;
   int nx, ny, nz;
   int itermax;
-  double eps;
+  double eps;          /* relative tolerance ||r||/||b||; 0 = fixed iterations */
+  char *solverVariant; /* CG/GMRES algorithm, see solverRegistry.c */
+  char *gmresOrtho;    /* GMRES orthogonalization scheme */
 #ifdef SCS
   int C;
   int Sigma;
@@ -43,6 +47,8 @@ typedef struct {
 
 void initParameter(Parameter *);
 void setParameterFilename(Parameter *, const char *);
+void setParameterString(char **, const char *);
+void formatStopMode(const Parameter *, char *, size_t);
 void readParameter(Parameter *, const char *);
 void printParameter(Parameter *);
 void freeParameter(Parameter *);
