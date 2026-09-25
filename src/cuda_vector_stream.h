@@ -91,10 +91,10 @@ typedef struct GpuVectorStream {
   V_ELE *rA[GPU_VSTREAM_NSLOT], *rB[GPU_VSTREAM_NSLOT], *rO[GPU_VSTREAM_NSLOT];
 
   /* Dense scratch (device). */
-  double *partial;   /* Gram / residual partial sums */
+  V_ELE *partial;    /* Gram / residual partial sums */
   size_t partialCap; /* elements */
-  double *G;         /* NS x NS accumulator (Gram results) */
-  double *B;         /* NS x NS (update matrix / eigenvectors) */
+  V_ELE *G;          /* NS x NS accumulator (Gram results) */
+  V_ELE *B;          /* NS x NS (update matrix / eigenvectors) */
   double *eval;      /* NS */
   int *sel;          /* NS selected Ritz pairs */
   double *res2;      /* NS squared residual norms */

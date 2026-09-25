@@ -1,0 +1,9 @@
+cheb_lam_lo 0.005
+cheb_lam_hi 0.09
+cheb_Np 150
+cheb_NS 30
+eps 1e-10
+itermax 30
+# GPU build only: search space is streamed from pinned host memory in
+# sub-blocks of cheb_nb columns, ignored by the CPU build.
+cheb_nb 16

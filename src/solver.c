@@ -124,7 +124,7 @@ void ddot_stride(const CG_UINT n,
   V_ELE sum = 0.0;
 #pragma omp parallel for reduction(+ : sum) schedule(OMP_SCHEDULE)
   for (CG_UINT i = 0; i < n; i++) {
-    sum += x[i * incx] * y[i * incy];
+    sum += VCONJ(x[i * incx]) * y[i * incy];
   }
   commReductionV(&sum, SUM);
   *result = sum;

@@ -22,24 +22,11 @@ int chebFDStreamTests(int argc, char **argv)
 
 #else
 
-#ifdef USE_COMPLEX
-
-int chebFDStreamTests(int argc, char **argv)
-{
-  (void)argc;
-  (void)argv;
-  printf("Skipping ChebFD streaming tests (USE_COMPLEX build; ChebFD v1 is "
-         "real-symmetric only).\n");
-  return 0;
-}
-
-#else
-
 #include "../../src/allocate.h"
 #include "../../src/chebFDSolver.h"
 #include "../../src/chebFilter.h"
 #include "../../src/comm.h"
-#include "../../src/cuda/cuda_kernels.h"
+#include "../../src/cuda_kernels.h"
 #include "../../src/matrix.h"
 #include "../../src/parameter.h"
 #include "../../src/solver.h"
@@ -146,8 +133,7 @@ static int testFilterParity(void)
     double maxdn = 0.0;
     for (CG_UINT r = 0; r < vecRows; r++) {
       for (int c = 0; c < nc; c++) {
-        maxdn = fmax(
-            maxdn, fabs((double)(yRef.entries[r * NS + c] - yStr.entries[r * nc + c])));
+        maxdn = fmax(maxdn, VABS(yRef.entries[r * NS + c] - yStr.entries[r * nc + c]));
       }
     }
     CHECK(maxdn < 1e-10, "filter nb=%d nc=%d max|diff|=%.3e", nbs[i], nc, maxdn);
@@ -196,33 +182,37 @@ static int testDensePassParity(void)
     double maxd = maxAbsDiff(ayRef.entries, ayH.entries, sz);
     CHECK(maxd < 1e-12, "spmmv max|diff|=%.3e", maxd);
 
-    /* Gram Y^T AY and Y^T Y */
-    double *Href = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(double));
-    double *Hstr = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(double));
+    /* Gram Y^H AY and Y^H Y */
+    V_ELE *Href = (V_ELE *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(V_ELE));
+    V_ELE *Hstr = (V_ELE *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(V_ELE));
     gpu_gramYtAY(A.nr, NS, y.entries, ayRef.entries, Href);
     gpu_vstream_gram(vs, yH.entries, ayH.entries, NS, Hstr);
-    maxd = maxAbsDiffD(Href, Hstr, (size_t)NS * NS);
-    CHECK(maxd < 1e-10, "gram Y^T AY max|diff|=%.3e", maxd);
+    maxd = maxAbsDiff(Href, Hstr, (size_t)NS * NS);
+    CHECK(maxd < 1e-10, "gram Y^H AY max|diff|=%.3e", maxd);
     gpu_gramYtAY(A.nr, NS, y.entries, y.entries, Href);
     gpu_vstream_gram(vs, yH.entries, NULL, NS, Hstr);
-    maxd = maxAbsDiffD(Href, Hstr, (size_t)NS * NS);
-    CHECK(maxd < 1e-10, "gram Y^T Y max|diff|=%.3e", maxd);
-    int sym = 1;
+    maxd = maxAbsDiff(Href, Hstr, (size_t)NS * NS);
+    CHECK(maxd < 1e-10, "gram Y^H Y max|diff|=%.3e", maxd);
+    /* Off-diagonal pairs must be exact conjugate mirrors (one accumulator
+     * writes both). The diagonal imaginary part is only ~0 to FMA-contraction
+     * noise (hipcc contracts conj(z)*z into fused form, so the per-term imag
+     * is ~1 ulp, not exactly 0), hence the tolerance there. */
+    int herm = 1;
     for (int i = 0; i < NS; i++) {
-      for (int j = 0; j < NS; j++) {
-        sym = sym && (Hstr[i * NS + j] == Hstr[j * NS + i]);
+      herm = herm &&
+          fabs(VIMAG(Hstr[i * NS + i])) < 1e-12 * (1.0 + VABS(Hstr[i * NS + i]));
+      for (int j = i + 1; j < NS; j++) {
+        herm = herm && (Hstr[j * NS + i] == VCONJ(Hstr[i * NS + j]));
       }
     }
-    CHECK(sym, "streamed Gram must be exactly symmetric");
+    CHECK(herm, "streamed Gram must be Hermitian");
 
-    /* Ritz residuals for a subset of pairs, arbitrary evec / eval. */
-    double *evec = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(double));
+    /* Ritz residuals for a subset of pairs, arbitrary complex evec / real eval. */
+    V_ELE *evec = (V_ELE *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(V_ELE));
     double *eval = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * sizeof(double));
-    double *evk  = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * sizeof(double));
+    V_ELE *evk   = (V_ELE *)allocate(ARRAY_ALIGNMENT, (size_t)NS * sizeof(V_ELE));
     V_ELE *avbuf = (V_ELE *)allocateDevice((size_t)A.nr * sizeof(V_ELE));
-    for (int i = 0; i < NS * NS; i++) {
-      evec[i] = (double)((i * 7919) % 23) / 23.0 - 0.5;
-    }
+    fillRandomBlock(evec, NS, NS, NS, 0x5eed11ull);
     for (int k = 0; k < NS; k++) {
       eval[k] = 0.3 * k + 0.1;
     }
@@ -234,11 +224,11 @@ static int testDensePassParity(void)
       gpu_computeRitzResidual(&y, &ayRef, NS, A.nr, eval[k], evec, k, evk, avbuf);
       V_ELE r2;
       gpu_ddot_sync(A.nr, avbuf, avbuf, &r2);
-      double d = fabs((double)r2 - res2[t]);
-      CHECK(d < 1e-10 * fmax(1.0, fabs((double)r2)),
+      double d = VABS(r2 - VCONST(res2[t], 0.0));
+      CHECK(d < 1e-10 * fmax(1.0, VABS(r2)),
           "ritz residual k=%d: resident %.12e streamed %.12e",
           k,
-          (double)r2,
+          VREAL(r2),
           res2[t]);
     }
     deallocate(evec);
@@ -283,12 +273,14 @@ static int testUpdateAndOrtho(void)
   GpuVectorStream *vs = gpu_vstream_init(&A, NS, 3, tinyChunkBytes(NS), 0);
   CHECK(vs != NULL, "gpu_vstream_init failed");
   if (vs != NULL) {
-    /* Y <- Y B with B = 2 * [I_4 ; 0] (m=6 -> mOut=4): compaction + scale. */
+    /* Y <- Y B with B = 2 * [I_4 ; 0] (m=6 -> mOut=4): compaction + scale.
+     * A real sub-case: the Loewdin B in production is a real-scaled complex
+     * eigenvector block, and the identity-like fill pins the plain matmul. */
     const int mOut = 4;
-    double *B = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * mOut * sizeof(double));
+    V_ELE *B = (V_ELE *)allocate(ARRAY_ALIGNMENT, (size_t)NS * mOut * sizeof(V_ELE));
     for (int i = 0; i < NS; i++) {
       for (int j = 0; j < mOut; j++) {
-        B[i * mOut + j] = (i == j) ? 2.0 : 0.0;
+        B[i * mOut + j] = VCONST((i == j) ? 2.0 : 0.0, 0.0);
       }
     }
     memcpy(yH.entries, y0.entries, sz * sizeof(V_ELE));
@@ -297,34 +289,51 @@ static int testUpdateAndOrtho(void)
     for (CG_UINT r = 0; r < vecRows; r++) {
       for (int j = 0; j < mOut; j++) {
         maxd = fmax(maxd,
-            fabs(
-                (double)yH.entries[r * mOut + j] - 2.0 * (double)y0.entries[r * NS + j]));
+            VABS(yH.entries[r * mOut + j] - VCONST(2.0, 0.0) * y0.entries[r * NS + j]));
       }
     }
     CHECK(maxd < 1e-12, "update (compact to %d, x2) max|diff|=%.3e", mOut, maxd);
     deallocate(B);
 
-    /* Cholesky-QR2: full rank -> m = NS and Y^T Y = I. */
-    double *G    = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(double));
+    /* Genuinely complex B vs a host reference matmul: the streamed update is
+     * the plain product Y * B (no conjugation), so every entry must match an
+     * independent host accumulation of the same sums. */
+    V_ELE *Bc = (V_ELE *)allocate(ARRAY_ALIGNMENT, (size_t)NS * mOut * sizeof(V_ELE));
+    V_ELE *ref =
+        (V_ELE *)allocate(ARRAY_ALIGNMENT, (size_t)vecRows * mOut * sizeof(V_ELE));
+    fillRandomBlock(Bc, NS, NS, mOut, 0xba5efe11ull);
+    for (CG_UINT r = 0; r < vecRows; r++) {
+      for (int j = 0; j < mOut; j++) {
+        V_ELE acc = VCONST(0.0, 0.0);
+        for (int i = 0; i < NS; i++) {
+          acc += y0.entries[r * NS + i] * Bc[i * mOut + j];
+        }
+        ref[r * mOut + j] = acc;
+      }
+    }
+    memcpy(yH.entries, y0.entries, sz * sizeof(V_ELE));
+    gpu_vstream_update(vs, yH.entries, NS, Bc, mOut);
+    maxd = maxAbsDiff(ref, yH.entries, (size_t)vecRows * (size_t)mOut);
+    CHECK(maxd < 1e-12, "update complex B max|diff|=%.3e", maxd);
+    deallocate(Bc);
+    deallocate(ref);
+
+    /* Cholesky-QR2: full rank -> m = NS and Y^H Y = I. */
+    V_ELE *G     = (V_ELE *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(V_ELE));
     double *eval = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * sizeof(double));
-    double *evec = (double *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(double));
+    V_ELE *evec  = (V_ELE *)allocate(ARRAY_ALIGNMENT, (size_t)NS * NS * sizeof(V_ELE));
     memcpy(yH.entries, y0.entries, sz * sizeof(V_ELE));
     int m = chebOrthoCholQR2(vs, yH.entries, NS, 1e-8, G, eval, evec, 2);
     CHECK(m == NS, "full-rank block: m=%d, expected %d", m, NS);
     if (m > 0) {
       gpu_vstream_gram(vs, yH.entries, NULL, m, G);
-      double offd = 0.0;
-      for (int i = 0; i < m; i++) {
-        for (int j = 0; j < m; j++) {
-          offd = fmax(offd, fabs(G[i * m + j] - (i == j ? 1.0 : 0.0)));
-        }
-      }
-      CHECK(offd < 1e-12, "Y^T Y - I max|.|=%.3e after CholQR2", offd);
+      double offd = maxDevFromIdentity(G, m);
+      CHECK(offd < 1e-12, "Y^H Y - I max|.|=%.3e after CholQR2", offd);
       /* padding rows must still be zero */
       double pad = 0.0;
       for (CG_UINT r = A.nr; r < vecRows; r++) {
         for (int j = 0; j < m; j++) {
-          pad = fmax(pad, fabs((double)yH.entries[r * m + j]));
+          pad = fmax(pad, VABS(yH.entries[r * m + j]));
         }
       }
       CHECK(pad == 0.0, "padding rows not zero after update (%.3e)", pad);
@@ -339,13 +348,8 @@ static int testUpdateAndOrtho(void)
     CHECK(m == NS - 1, "rank-deficient block: m=%d, expected %d", m, NS - 1);
     if (m > 0) {
       gpu_vstream_gram(vs, yH.entries, NULL, m, G);
-      double offd = 0.0;
-      for (int i = 0; i < m; i++) {
-        for (int j = 0; j < m; j++) {
-          offd = fmax(offd, fabs(G[i * m + j] - (i == j ? 1.0 : 0.0)));
-        }
-      }
-      CHECK(offd < 1e-12, "Y^T Y - I max|.|=%.3e after rank-deficient CholQR2", offd);
+      double offd = maxDevFromIdentity(G, m);
+      CHECK(offd < 1e-12, "Y^H Y - I max|.|=%.3e after rank-deficient CholQR2", offd);
     }
     deallocate(G);
     deallocate(eval);
@@ -437,7 +441,5 @@ int chebFDStreamTests(int argc, char **argv)
   printf("\nSummary: %d/%d ChebFD streaming test sections passed.\n", passed, i);
   return (passed == i) ? 0 : 1;
 }
-
-#endif /* USE_COMPLEX */
 
 #endif /* GPU backend */

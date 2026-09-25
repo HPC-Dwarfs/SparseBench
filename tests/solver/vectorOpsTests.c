@@ -27,7 +27,7 @@ int vectorOpsTests(int argc, char **argv)
 #include <stdlib.h>
 
 #include "../../src/allocate.h"
-#include "../../src/cuda/cuda_kernels.h"
+#include "../../src/cuda_kernels.h"
 
 #define CHECK(cond, msg, ...)                                                            \
   do {                                                                                   \

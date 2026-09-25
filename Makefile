@@ -4,7 +4,8 @@
 # license that can be found in the LICENSE file.
 
 #CONFIGURE BUILD SYSTEM
-TARGET     = sparseBench-$(MTX_FMT)-$(TOOLCHAIN)
+COMPLEX_TAG = $(if $(filter true,$(strip $(USE_COMPLEX_ELEMENTS))),complex,real)
+TARGET	   = sparseBench-$(MTX_FMT)-$(COMPLEX_TAG)-$(TOOLCHAIN)
 BUILD_DIR  = ./build/$(MTX_FMT)-$(TOOLCHAIN)
 SRC_DIR    = ./src
 MAKE_DIR   = ./mk

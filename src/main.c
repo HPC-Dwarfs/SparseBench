@@ -41,7 +41,6 @@ static void firstTouchFill(V_ELE *data_ptr, size_t elem_count, V_ELE value)
 static void initMatrix(CommType *c, Parameter *p, GMatrix *m)
 {
   if (matrixIsScamac(p->filename)) {
-    printf("Matrix %s is SCAMAC\n", p->filename);
     matrixGenerateScamac(m, p->filename, c->rank, c->size);
   } else if (strcmp(p->filename, "generate") == 0) {
     matrixGenerate(m, p, c->rank, c->size, false);

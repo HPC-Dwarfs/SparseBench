@@ -7,23 +7,23 @@
 #include <math.h>
 #include <string.h>
 
-/* Classic cyclic Jacobi rotations until the off-diagonal norm is negligible.
- * Threshold strategy (Schur): skip tiny rotations in the first sweeps. */
-void jacobiEigen(double *a, int n, double *eval, double *evec)
+// Classic cyclic Jacobi rotations until the off-diagonal norm is negligible.
+// Threshold strategy (Schur): skip tiny rotations in the first sweeps.
+void jacobiEigen(V_ELE *a, int n, double *eval, V_ELE *evec)
 {
   if (n <= 0) {
     return;
   }
   if (n == 1) {
-    eval[0] = a[0];
-    evec[0] = 1.0;
+    eval[0] = VREAL(a[0]);
+    evec[0] = VCONST(1.0, 0.0);
     return;
   }
 
   /* eigenvectors start as identity */
   for (int i = 0; i < n; i++) {
     for (int j = 0; j < n; j++) {
-      evec[i * n + j] = (i == j) ? 1.0 : 0.0;
+      evec[i * n + j] = (i == j) ? VCONST(1.0, 0.0) : VCONST(0.0, 0.0);
     }
   }
 
@@ -37,7 +37,7 @@ void jacobiEigen(double *a, int n, double *eval, double *evec)
     double off = 0.0;
     for (int p = 0; p < n - 1; p++) {
       for (int q = p + 1; q < n; q++) {
-        off += fabs(a[p * n + q]);
+        off += VABS(a[p * n + q]);
       }
     }
     if (off == 0.0) {
@@ -48,47 +48,55 @@ void jacobiEigen(double *a, int n, double *eval, double *evec)
 
     for (int p = 0; p < n - 1; p++) {
       for (int q = p + 1; q < n; q++) {
-        double apq = a[p * n + q];
-        double g   = 100.0 * fabs(apq);
-        double app = a[p * n + p];
-        double aqq = a[q * n + q];
+        V_ELE w     = a[p * n + q]; /* w = a_pq = |w| e^{i gamma} */
+        double wabs = VABS(w);
+        double g    = 100.0 * wabs;
+        double app  = VREAL(a[p * n + p]);
+        double aqq  = VREAL(a[q * n + q]);
 
         if (sweep > 3 && fabs(app) + g == fabs(app) && fabs(aqq) + g == fabs(aqq)) {
-          a[p * n + q] = 0.0; /* element negligible */
-        } else if (fabs(apq) > thresh) {
+          a[p * n + q] = VCONST(0.0, 0.0); /* element negligible */
+          a[q * n + p] = VCONST(0.0, 0.0);
+        } else if (wabs > thresh) {
           double h = aqq - app;
           double t;
           if (fabs(h) + g == fabs(h)) {
-            t = apq / h;
+            t = wabs / h;
           } else {
-            double theta = 0.5 * h / apq;
+            double theta = 0.5 * h / wabs;
             t            = 1.0 / (fabs(theta) + sqrt(1.0 + theta * theta));
             if (theta < 0.0)
               t = -t;
           }
-          double c     = 1.0 / sqrt(1.0 + t * t);
-          double s     = t * c;
-          double tau   = s / (1.0 + c);
+          double c   = 1.0 / sqrt(1.0 + t * t);
+          double s   = t * c;
+          double tau = s / (1.0 + c);
 
-          double h_rot = t * apq;
-          a[p * n + p] = app - h_rot;
-          a[q * n + q] = aqq + h_rot;
-          a[p * n + q] = 0.0;
-          a[q * n + p] = 0.0;
+          /* unit phase of a_pq; exactly +-1 for real input */
+          V_ELE e      = w / (V_ELE)wabs;
+          V_ELE econj  = VCONJ(e);
+
+          double h_rot = t * wabs;
+          a[p * n + p] = VCONST(app - h_rot, 0.0);
+          a[q * n + q] = VCONST(aqq + h_rot, 0.0);
+          a[p * n + q] = VCONST(0.0, 0.0);
+          a[q * n + p] = VCONST(0.0, 0.0);
 
           for (int k = 0; k < n; k++) {
             if (k != p && k != q) {
-              double akp   = a[k * n + p];
-              double akq   = a[k * n + q];
-              a[k * n + p] = akp - s * (akq + tau * akp);
-              a[p * n + k] = a[k * n + p];
-              a[k * n + q] = akq + s * (akp - tau * akq);
-              a[q * n + k] = a[k * n + q];
+              V_ELE akp    = a[k * n + p];
+              V_ELE akq    = a[k * n + q];
+              V_ELE np     = akp - s * (econj * akq + tau * akp);
+              V_ELE nq     = akq + s * (e * akp - tau * akq);
+              a[k * n + p] = np;
+              a[p * n + k] = VCONJ(np);
+              a[k * n + q] = nq;
+              a[q * n + k] = VCONJ(nq);
             }
-            double vkp      = evec[k * n + p];
-            double vkq      = evec[k * n + q];
-            evec[k * n + p] = vkp - s * (vkq + tau * vkp);
-            evec[k * n + q] = vkq + s * (vkp - tau * vkq);
+            V_ELE vkp       = evec[k * n + p];
+            V_ELE vkq       = evec[k * n + q];
+            evec[k * n + p] = vkp - s * (econj * vkq + tau * vkp);
+            evec[k * n + q] = vkq + s * (e * vkp - tau * vkq);
           }
         }
       }
@@ -96,10 +104,11 @@ void jacobiEigen(double *a, int n, double *eval, double *evec)
   }
 
   for (int i = 0; i < n; i++) {
-    eval[i] = a[i * n + i];
+    eval[i] = VREAL(a[i * n + i]);
   }
 
-  /* selection sort of eigenpairs by ascending eigenvalue (swaps full columns) */
+  /* selection sort of eigenpairs by ascending eigenvalue (swaps full columns);
+   * the sort key is the real eval[] only, never the matrix entries */
   for (int i = 0; i < n - 1; i++) {
     int best = i;
     for (int j = i + 1; j < n; j++) {
@@ -112,7 +121,7 @@ void jacobiEigen(double *a, int n, double *eval, double *evec)
       eval[i]    = eval[best];
       eval[best] = tmp;
       for (int k = 0; k < n; k++) {
-        double vk          = evec[k * n + i];
+        V_ELE vk           = evec[k * n + i];
         evec[k * n + i]    = evec[k * n + best];
         evec[k * n + best] = vk;
       }

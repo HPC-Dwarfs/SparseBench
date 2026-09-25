@@ -1,7 +1,10 @@
-filename scamac:Anderson,Lx=100,Ly=100,Lz=100,ranpot=2.5
 # ChebFD larger profile-run param file (for nsys timeline generation)
-cheb_lam_lo -6
-cheb_lam_hi 6
+filename generate7P
+nx 32
+ny 32
+nz 32
+cheb_lam_lo 25
+cheb_lam_hi 32
 cheb_Np 150
 cheb_NS 64
 eps 1e-6

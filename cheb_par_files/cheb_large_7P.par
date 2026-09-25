@@ -1,0 +1,13 @@
+filename generate7P
+nx 32
+ny 32
+nz 32
+cheb_lam_lo 26.49
+cheb_lam_hi 26.51
+cheb_Np 6000
+cheb_NS 256
+eps 1e-6
+itermax 5
+# GPU build only: search space is streamed from pinned host memory in
+# sub-blocks of cheb_nb columns, ignored by the CPU build.
+cheb_nb 16

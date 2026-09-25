@@ -100,14 +100,14 @@ void gpu_vstream_filter(GpuVectorStream *s,
 /* AY = A * Y over nc columns. */
 void gpu_vstream_spmmv(GpuVectorStream *s, const V_ELE *Yh, V_ELE *AYh, int nc);
 
-/* G (m x m, host) = A^T B for two vecRows x m blocks (pass Bh == Ah or
- * NULL for A^T A). Exactly symmetric. */
+/* G (m x m, host) = A^H B for two vecRows x m blocks (pass Bh == Ah or
+ * NULL for A^H A). Exactly Hermitian. */
 void gpu_vstream_gram(
-    GpuVectorStream *s, const V_ELE *Ah, const V_ELE *Bh, int m, double *Gh);
+    GpuVectorStream *s, const V_ELE *Ah, const V_ELE *Bh, int m, V_ELE *Gh);
 
 /* Y (stride m) <- Y * B with B m x mOut row-major (host); the result is
  * written back in place at stride mOut (<= m). */
-void gpu_vstream_update(GpuVectorStream *s, V_ELE *Yh, int m, const double *Bh, int mOut);
+void gpu_vstream_update(GpuVectorStream *s, V_ELE *Yh, int m, const V_ELE *Bh, int mOut);
 
 /* res2[t] = || AY e_k - eval[k] Y e_k ||^2 for k = sel[t], t < nsel, with
  * e_k = evec[:, k] (evec m x m row-major as produced by jacobiEigen). */
@@ -116,7 +116,7 @@ void gpu_vstream_ritzResiduals(GpuVectorStream *s,
     const V_ELE *AYh,
     int m,
     const double *eval,
-    const double *evec,
+    const V_ELE *evec,
     const int *sel,
     int nsel,
     double *res2);
@@ -156,16 +156,16 @@ void gpu_ddot_sync(CG_UINT n, const V_ELE *x, const V_ELE *y, V_ELE *result);
 
 /* Dense ChebFD block steps (cuda_chebfd_dense.cu). Signatures mirror their
  * host counterparts in chebFDSolver.h. */
-void gpu_gramYtAY(CG_UINT nr, int m, const V_ELE *Ye, const V_ELE *AYe, double *H);
+void gpu_gramYtAY(CG_UINT nr, int m, const V_ELE *Ye, const V_ELE *AYe, V_ELE *H);
 
 void gpu_computeRitzResidual(DMatrix *Y,
     DMatrix *AY,
     int m,
     CG_UINT nr,
     double evalk,
-    double *evec,
+    V_ELE *evec,
     int k,
-    double *evk,
+    V_ELE *evk,
     V_ELE *avbuf);
 
 /* Release the persistent scratch owned by cuda_chebfd_dense.cu. */

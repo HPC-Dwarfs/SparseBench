@@ -17,7 +17,7 @@
 #include "solver/vectorOpsTests.h"
 
 #if defined(RUNTIME_BACKEND_IS_CUDA) || defined(RUNTIME_BACKEND_IS_HIP)
-#include "../src/cuda/cuda_kernels.h"
+#include "../src/cuda_kernels.h"
 #endif
 
 // genrator for test codes. One bit per suite.
