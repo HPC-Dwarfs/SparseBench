@@ -22,7 +22,8 @@
 
 /* Grow-only device buffer: (re)allocate *p to hold at least `elems`
  * elements of `elemSize` bytes, tracking the capacity in *capElems. */
-static inline void gpuGrowBuffer(void **p, size_t *capElems, size_t elems, size_t elemSize)
+static inline void gpuGrowBuffer(
+    void **p, size_t *capElems, size_t elems, size_t elemSize)
 {
   if (elems > *capElems) {
     if (*p != NULL) {
@@ -92,8 +93,10 @@ static inline void launchGram(CG_UINT rows,
   kernel_gram_chunk<<<dim3(tiles, tiles, nSub), dim3(GRAM_TILE, GRAM_TILE), 0, stream>>>(
       rows, m, A, ldA, B, ldB, partial, rowsPerSub);
   GPU_CHECK_LAUNCH();
-  kernel_gram_accum<<<dim3((m + LIN_THREADS - 1) / LIN_THREADS, m), LIN_THREADS, 0, stream>>>(
-      m, nSub, partial, G, accumulate);
+  kernel_gram_accum<<<dim3((m + LIN_THREADS - 1) / LIN_THREADS, m),
+      LIN_THREADS,
+      0,
+      stream>>>(m, nSub, partial, G, accumulate);
   GPU_CHECK_LAUNCH();
 }
 

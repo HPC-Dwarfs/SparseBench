@@ -51,7 +51,6 @@
 #define VEC_TILE 32
 #define ROW_TILE 8
 
-
 /* ------------------------------------------------------------------ */
 /*  SCS SpMV:  y = A * x                                             */
 /*                                                                    */
@@ -204,7 +203,6 @@ __global__ void kernel_chebfd_scs(CG_UINT nPartChunks,
   }
 }
 
-
 /* Two adjacent block columns per thread (V_ELE2 = double2 / float2): same
  * bytes as kernel_chebfd_scs, half the L1/L2 requests. ncu on the scalar
  * kernel: L2 throughput 70 % > DRAM 62 %, gathers are 60 % of the L2
@@ -252,7 +250,7 @@ __global__ void kernel_chebfd_scs_v2(CG_UINT nPartChunks,
     for (CG_UINT j = 0; j < len; j++) {
       CG_UINT idx = offset + j * C + lane;
       V_ELE v     = val[idx];
-      V_ELE2 xv   = *reinterpret_cast<const V_ELE2 *>(&xin[(size_t)colInd[idx] * ld + vec]);
+      V_ELE2 xv = *reinterpret_cast<const V_ELE2 *>(&xin[(size_t)colInd[idx] * ld + vec]);
       t0 += v * xv.x;
       t1 += v * xv.y;
     }
@@ -272,8 +270,8 @@ __global__ void kernel_chebfd_scs_v2(CG_UINT nPartChunks,
       t1 += cR * rv.y;
     }
     V_ELE2 yv;
-    yv.x = t0;
-    yv.y = t1;
+    yv.x                               = t0;
+    yv.y                               = t1;
     *reinterpret_cast<V_ELE2 *>(&y[e]) = yv;
     if (acc != NULL) {
       V_ELE2 av = *reinterpret_cast<V_ELE2 *>(&acc[e]);
@@ -284,7 +282,6 @@ __global__ void kernel_chebfd_scs_v2(CG_UINT nPartChunks,
   }
 }
 #endif /* !USE_COMPLEX */
-
 
 /* Four adjacent block columns per thread (V_ELE4 = double4 / float4; two
  * 16 B loads per operand). ~3 % faster than the column-pair kernel at the
@@ -331,7 +328,7 @@ __global__ void kernel_chebfd_scs_v4(CG_UINT nPartChunks,
     for (CG_UINT j = 0; j < len; j++) {
       CG_UINT idx = offset + j * C + lane;
       V_ELE v     = val[idx];
-      V_ELE4 xv   = *reinterpret_cast<const V_ELE4 *>(&xin[(size_t)colInd[idx] * ld + vec]);
+      V_ELE4 xv = *reinterpret_cast<const V_ELE4 *>(&xin[(size_t)colInd[idx] * ld + vec]);
       t0 += v * xv.x;
       t1 += v * xv.y;
       t2 += v * xv.z;
@@ -359,10 +356,10 @@ __global__ void kernel_chebfd_scs_v4(CG_UINT nPartChunks,
       t3 += cR * rv.w;
     }
     V_ELE4 yv;
-    yv.x = t0;
-    yv.y = t1;
-    yv.z = t2;
-    yv.w = t3;
+    yv.x                               = t0;
+    yv.y                               = t1;
+    yv.z                               = t2;
+    yv.w                               = t3;
     *reinterpret_cast<V_ELE4 *>(&y[e]) = yv;
     if (acc != NULL) {
       V_ELE4 av = *reinterpret_cast<V_ELE4 *>(&acc[e]);
@@ -437,8 +434,8 @@ static void launchChebfdPart(const GpuPartView *v, gpuStream_t stream, void *ua)
   uintptr_t ptrs = (uintptr_t)a->x | (uintptr_t)a->p | (uintptr_t)a->y |
                    (uintptr_t)(a->q ? a->q : a->x) | (uintptr_t)(a->r ? a->r : a->x) |
                    (uintptr_t)(a->acc ? a->acc : a->x);
-  int pairOk = (w % 2 == 0) && (a->ld % 2 == 0) && (ptrs % 16 == 0);
-  int quadOk = pairOk && (w % 4 == 0) && (a->ld % 4 == 0) && (ptrs % 32 == 0);
+  int pairOk     = (w % 2 == 0) && (a->ld % 2 == 0) && (ptrs % 16 == 0);
+  int quadOk     = pairOk && (w % 4 == 0) && (a->ld % 4 == 0) && (ptrs % 32 == 0);
   if (quadOk && g_chebfdVec == 4) {
     CG_UINT wq  = w / 4;
     unsigned vt = vecTile(wq);

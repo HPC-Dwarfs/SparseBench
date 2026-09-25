@@ -36,7 +36,7 @@ typedef struct {
   CG_UINT nr, nc, nnz;       // number of rows, columns and non zeros
   CG_UINT totalNr, totalNnz; // number of total rows and non zeros
   CG_UINT startRow, stopRow; // range of rows owned by current rank
-  CG_UINT *rowPtr; // row Pointer
+  CG_UINT *rowPtr;           // row Pointer
   CG_UINT *
       rowLocalEnd; // first colInd index of external entries in each row (enables split SpMV)
   CG_UINT nBoundaryRows; // number of rows that own at least one external entry

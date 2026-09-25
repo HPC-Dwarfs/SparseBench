@@ -51,7 +51,7 @@ typedef enum {
   SPMVM_LOCAL,
   SPMVM_EXT,
   DDOT,
-  COMM, // packing and posting the halo exchange
+  COMM,      // packing and posting the halo exchange
   COMM_WAIT, // exposed (non-overlapped) halo exchange time
   NUMREGIONS
 } RegionsType;
