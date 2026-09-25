@@ -268,7 +268,7 @@ const char *scamac_generator_query_name(const ScamacGenerator *gen)
 {
   static const char msg[] = "Unknown example";
   if (gen) {
-    if (gen->name) {
+    if (gen->name[0] != '\0') {
       return gen->name;
     } else {
       return msg;
