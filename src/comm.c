@@ -291,7 +291,8 @@ static void buildElementsToSend(CommType *c, int startRow, int *extLocalToGlobal
   }
 
   c->sendBuffer = (V_ELE *)allocate(ARRAY_ALIGNMENT, c->totalSendCount * sizeof(V_ELE));
-  MPI_Request request[c->outdegree];
+  // Zero-length VLAs are undefined behavior; a rank may have no neighbors
+  MPI_Request request[MAX(c->outdegree, 1)];
   c->elementsToSend   = (int *)allocate(ARRAY_ALIGNMENT, c->totalSendCount * sizeof(int));
   int *elementsToSend = c->elementsToSend;
 
@@ -310,7 +311,7 @@ static void buildElementsToSend(CommType *c, int startRow, int *extLocalToGlobal
     j += c->sendCounts[i];
   }
 
-  MPI_Request send_request[c->indegree];
+  MPI_Request send_request[MAX(c->indegree, 1)];
 
   j = 0;
   for (int i = 0; i < c->indegree; i++) {
@@ -633,10 +634,11 @@ static int findExternalOwningRanks(CommType *c,
 static void setupTopology(
     CommType *c, const int sourceCount, const int *recvFromNeighbors)
 {
-  int sources[sourceCount];
-  int degrees[sourceCount];
-  int destinations[sourceCount];
-  int weights[sourceCount];
+  // Zero-length VLAs are undefined behavior; a rank may have no sources
+  int sources[MAX(sourceCount, 1)];
+  int degrees[MAX(sourceCount, 1)];
+  int destinations[MAX(sourceCount, 1)];
+  int weights[MAX(sourceCount, 1)];
   int cursor = 0;
   int size   = c->size;
 
