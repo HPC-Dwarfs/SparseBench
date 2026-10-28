@@ -47,6 +47,13 @@ else
   ALL_OBJ   = $(OBJ) $(BUILD_DIR)/matrix-$(MTX_FMT).o
 endif
 
+# Rebuild every object when the effective flags change even if config.mk
+# itself was not touched: command line overrides like ENABLE_MPI=true land in
+# the same build directory and would otherwise link stale objects. The recipe
+# keeps the stamp mtime unchanged while the flags stay the same.
+BUILD_FLAGS       := '$(CC) $(CPPFLAGS) $(CFLAGS) $(NVCC) $(NVCCFLAGS) $(LFLAGS) $(LIBS)'
+BUILD_FLAGS_STAMP := $(BUILD_DIR)/.build-flags
+
 c := ,
 clist = $(subst $(eval) ,$c,$(strip $1))
 
@@ -58,7 +65,7 @@ endef
 
 # $(BUILD_DIR) is order-only: its mtime changes whenever an object is written,
 # which would otherwise force a pointless relink on every invocation.
-$(TARGET): $(ALL_OBJ) $(SCAMAC_LIB) | $(BUILD_DIR) .clangd
+$(TARGET): $(ALL_OBJ) $(SCAMAC_LIB) $(BUILD_FLAGS_STAMP) | $(BUILD_DIR) .clangd
 	$(info ===>  LINKING  $(TARGET))
 	$(Q)${LD} ${LFLAGS} -o $(TARGET) $(ALL_OBJ) $(LIBS)
 
@@ -66,12 +73,12 @@ $(SCAMAC_LIB): $(SCAMAC_SRC) $(MAKE_DIR)/include_$(TOOLCHAIN).mk config.mk
 	$(info ===>  BUILD  $(SCAMAC_LIB))
 	$(Q)$(MAKE) --no-print-directory -C $(SCAMAC_DIR)
 
-$(BUILD_DIR)/%.o:  %.c $(MAKE_DIR)/include_$(TOOLCHAIN).mk $(MAKE_DIR)/include_SECTIMER.mk config.mk | $(BUILD_DIR)
+$(BUILD_DIR)/%.o:  %.c $(MAKE_DIR)/include_$(TOOLCHAIN).mk $(MAKE_DIR)/include_SECTIMER.mk config.mk $(BUILD_FLAGS_STAMP) | $(BUILD_DIR)
 	$(info ===>  COMPILE  $@)
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) $< -o $@
 	$(Q)$(CC) $(CPPFLAGS) -MT $(@:.d=.o) -MM  $< > $(BUILD_DIR)/$*.d
 
-$(BUILD_DIR)/%.o: %.cu $(MAKE_DIR)/include_$(TOOLCHAIN).mk $(MAKE_DIR)/include_SECTIMER.mk config.mk | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: %.cu $(MAKE_DIR)/include_$(TOOLCHAIN).mk $(MAKE_DIR)/include_SECTIMER.mk config.mk $(BUILD_FLAGS_STAMP) | $(BUILD_DIR)
 	$(info ===>  COMPILE CUDA  $@)
 	$(NVCC) -c $(NVCCFLAGS) $(DEFINES) $(OPTIONS) $(INCLUDES) $< -o $@
 
@@ -79,7 +86,13 @@ $(BUILD_DIR)/%.s:  %.c
 	$(info ===>  GENERATE ASM  $@)
 	$(CC) -S $(CPPFLAGS) $(CFLAGS) $< -o $@
 
-.PHONY: clean distclean info asm format
+$(BUILD_FLAGS_STAMP): FORCE | $(BUILD_DIR)
+	@printf '%s\n' $(BUILD_FLAGS) > $@.tmp
+	@if cmp -s $@.tmp $@ 2>/dev/null; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
+
+FORCE:
+
+.PHONY: clean distclean info asm format FORCE
 
 clean:
 	$(info ===>  CLEAN)

@@ -47,7 +47,7 @@ HALO_TARGET = haloCheck
 # suite means adding one .c here and nothing else.
 # Module 1 (matrix): SELL-C-sigma conversion tests are SCS only
 ifeq ($(MTX_FMT),SCS)
-MOD1_SOURCES=$(MOD1)/convertSCS.c $(MOD1)/matrixTests.c
+MOD1_SOURCES=$(MOD1)/convertSCS.c $(MOD1)/matrixTests.c $(MOD1)/scsReferenceTests.c
 else
 MOD1_SOURCES=
 endif

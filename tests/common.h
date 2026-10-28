@@ -73,8 +73,8 @@ typedef struct {
 #ifndef FORMAT_AND_STRIP_MATRIX_FILE
 #define FORMAT_AND_STRIP_MATRIX_FILE(A, entry, C_str, sigma_str)                         \
   {                                                                                      \
-    sprintf((C_str), "%d", (A).C);                                                       \
-    sprintf((sigma_str), "%d", (A).sigma);                                               \
+    sprintf((C_str), "%llu", (unsigned long long)(A).C);                                 \
+    sprintf((sigma_str), "%llu", (unsigned long long)(A).sigma);                         \
     char *dot = strrchr((entry)->d_name, '.');                                           \
     if (dot != NULL) {                                                                   \
       *dot = '\0';                                                                       \

@@ -45,12 +45,11 @@ void solverInitVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
       b[rowID] = rhsScale;
     }
   }
-#elif SCS
+#elif defined(SCS)
   CG_UINT numRows       = m->nr;
   CG_UINT c             = m->C;
   CG_UINT *chunkPtr     = m->chunkPtr;
   CG_UINT *chunkLens    = m->chunkLens;
-  CG_UINT *colInd       = m->colInd;
   V_ELE *val            = m->val;
   CG_UINT *oldToNewPerm = m->oldToNewPerm;
 
@@ -66,21 +65,17 @@ void solverInitVectors(Matrix *m, V_ELE *x, V_ELE *b, V_ELE *xexact)
     CG_UINT chunkStart = chunkPtr[chunkIdx];
     CG_UINT rowLen     = chunkLens[chunkIdx];
 
-    // Count actual non-zero values in this row
-    int nnzrow = 0;
+    /* SCS keeps no per-row length, and counting nonzero values would also drop
+     * stored zeros. The row sum is A * ones, which for the generated stencil
+     * (diagonal 27, off-diagonals -1) is exactly the CRS 27 - (nnzrow - 1);
+     * padding entries hold 0 and add nothing. */
+    V_ELE rowSum = 0.0;
     for (CG_UINT j = 0; j < rowLen; ++j) {
-      CG_UINT idx = chunkStart + j * c + chunkRow;
-#ifdef USE_COMPLEX
-      if (VREAL(val[idx]) != 0.0 || VIMAG(val[idx]) != 0.0) {
-#else
-      if (val[idx] != 0.0) {
-#endif
-        nnzrow++;
-      }
+      rowSum += val[chunkStart + j * c + chunkRow];
     }
 
     if (xexact != NULL) {
-      b[rowID]      = rhsScale * (27.0 - ((CG_FLOAT)(nnzrow - 1)));
+      b[rowID]      = rhsScale * rowSum;
       xexact[rowID] = rhsScale;
     } else {
       b[rowID] = rhsScale;

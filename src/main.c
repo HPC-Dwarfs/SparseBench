@@ -95,6 +95,21 @@ int main(int argc, char **argv)
   initParameter(&param);
   parseArguments(&comm, &param, argc, argv);
 
+#ifdef SCS
+  /* C = 0 divides by zero in the chunk count and sigma = 0 never advances the
+   * sorting loop; negative values wrap to huge unsigned sizes. */
+  if (param.C < 1 || param.Sigma < 1) {
+    commAbort(&comm, "SELL-C-sigma: chunk size (-k) and sigma (-s) must be >= 1\n");
+  }
+  /* Legal, but sorting windows then straddle chunk boundaries, so rows of one
+   * chunk are not sorted together and padding is not minimized. */
+  if (param.Sigma > 1 && param.Sigma % param.C != 0 && commIsMaster(&comm)) {
+    printf("Warning: SELL-C-sigma sigma=%d is not a multiple of C=%d\n",
+        param.Sigma,
+        param.C);
+  }
+#endif
+
   /* Resolve the variant names only now: -t may follow -a, and a parameter file
    * may set the variant before -t is seen. Fail before any matrix setup. */
   SolverSelection sel;
@@ -153,7 +168,7 @@ int main(int argc, char **argv)
   commLocalization(&comm, &m);
 
   Matrix sm;
-#if SCS
+#ifdef SCS
   sm.C     = param.C;
   sm.sigma = param.Sigma;
 #endif
@@ -188,10 +203,20 @@ int main(int argc, char **argv)
    * sum it up to get the global one. */
   CG_FLOAT nnzSum = (CG_FLOAT)m.rowPtr[m.nr];
   commReduction(&nnzSum, SUM);
-  size_t globalNnz    = (size_t)nnzSum;
+  size_t globalNnz = (size_t)nnzSum;
 
-  factorFlops[SPMVM]  = globalNnz;
-  factorWords[SPMVM]  = (sizeof(CG_FLOAT) * globalNnz) + (sizeof(CG_UINT) * globalNnz);
+  /* SCS streams the padding entries too, so its traffic is charged on the
+   * stored element count (nnz / beta); flops stay on the useful nnz. */
+#ifdef SCS
+  CG_FLOAT elemSum = (CG_FLOAT)sm.nElems;
+  commReduction(&elemSum, SUM);
+  size_t globalElems = (size_t)elemSum;
+#else
+  size_t globalElems = globalNnz;
+#endif
+
+  factorFlops[SPMVM] = globalNnz;
+  factorWords[SPMVM] = (sizeof(CG_FLOAT) * globalElems) + (sizeof(CG_UINT) * globalElems);
   factorFlops[SPMMVM] = factorFlops[SPMVM] * param.blockwidth;
   factorWords[SPMMVM] = factorWords[SPMVM] * param.blockwidth;
 

@@ -10,14 +10,6 @@
 #include "matrix.h"
 #include "nvtx_marker.h"
 
-static inline int compareDesc(const void *a, const void *b)
-{
-  const int val_a = *(const int *)a;
-  const int val_b = *(const int *)b;
-
-  return val_b - val_a;
-}
-
 static inline int compareDescSCS(const void *a, const void *b)
 {
 
@@ -38,7 +30,7 @@ static inline int compareDescSCS(const void *a, const void *b)
 
 // used twice so made sense to make it as a function
 static CG_UINT maxRowLenInChunk(
-    const SellCSigmaPair *elemsPerRow, int chunkIdx, CG_UINT C)
+    const SellCSigmaPair *elemsPerRow, CG_UINT chunkIdx, CG_UINT C)
 {
   CG_UINT maxLength = 0;
   for (CG_UINT j = 0; j < C; ++j) {
@@ -91,23 +83,23 @@ void convertMatrix(Matrix *m, GMatrix *im)
   SellCSigmaPair *elemsPerRow =
       (SellCSigmaPair *)allocate(ARRAY_ALIGNMENT, m->nrPadded * sizeof(SellCSigmaPair));
 
-  for (int i = 0; i < m->nrPadded; ++i) {
+  for (CG_UINT i = 0; i < m->nrPadded; ++i) {
     elemsPerRow[i].index = i;
     elemsPerRow[i].count = 0;
   }
 
   // Collect the number of elements in each row
   CG_UINT *rowPtr = im->rowPtr;
-  for (int i = 0; i < m->nr; i++) {
+  for (CG_UINT i = 0; i < m->nr; i++) {
     elemsPerRow[i].count = rowPtr[i + 1] - rowPtr[i];
   }
 
   // Sort rows over a scope of sigma
   NVTX_RANGE_PUSH_C("Convert.SCS.sigmaSort", NVTX_C_CONVERT);
-  for (int i = 0; i < m->nrPadded; i += m->sigma) {
-    int chunkStart = i;
-    int chunkStop  = MIN(i + m->sigma, m->nrPadded);
-    int size       = chunkStop - chunkStart;
+  for (CG_UINT i = 0; i < m->nrPadded; i += m->sigma) {
+    CG_UINT chunkStart = i;
+    CG_UINT chunkStop  = MIN(i + m->sigma, m->nrPadded);
+    CG_UINT size       = chunkStop - chunkStart;
 
     // Sorting rows by element count using struct keeps index/count together
 #ifdef __linux__
@@ -122,11 +114,14 @@ void convertMatrix(Matrix *m, GMatrix *im)
   /* Derive the total element count (nElems) before allocating, since colInd
    * and val are sized by it. */
   CG_UINT nElems = 0;
-  for (int i = 0; i < m->nChunks; ++i) {
+  for (CG_UINT i = 0; i < m->nChunks; ++i) {
     nElems += maxRowLenInChunk(elemsPerRow, i, m->C) * m->C;
   }
   m->nElems = nElems;
-  m->beta   = (double)m->nnz / (double)m->nElems;
+  /* Fill ratio of the real entries (rowPtr[nr]; im->nnz is only an
+   * allocation upper bound for generated matrices). A rank without rows
+   * stores nothing, so count it as fully filled instead of dividing by 0. */
+  m->beta = nElems ? (double)rowPtr[m->nr] / (double)nElems : 1.0;
 
   /* Allocate every format-specific array in one place. */
   allocMatrix(m);
@@ -134,7 +129,7 @@ void convertMatrix(Matrix *m, GMatrix *im)
   /* Publish the chunk layout (chunkLens + chunkPtr). */
   {
     CG_UINT currentChunkPtr = 0;
-    for (int i = 0; i < m->nChunks; ++i) {
+    for (CG_UINT i = 0; i < m->nChunks; ++i) {
       m->chunkLens[i] = maxRowLenInChunk(elemsPerRow, i, m->C);
       m->chunkPtr[i]  = currentChunkPtr;
       currentChunkPtr += m->chunkLens[i] * m->C;
@@ -143,23 +138,23 @@ void convertMatrix(Matrix *m, GMatrix *im)
   }
 
   // Construct permutation vector
-  for (int i = 0; i < m->nrPadded; ++i) {
+  for (CG_UINT i = 0; i < m->nrPadded; ++i) {
     CG_UINT oldRow = elemsPerRow[i].index;
     if (oldRow < m->nr)
       m->oldToNewPerm[oldRow] = (CG_UINT)i;
   }
 
   // Construct inverse permutation vector
-  for (int i = 0; i < m->nr; ++i) {
+  for (CG_UINT i = 0; i < m->nr; ++i) {
 #ifdef VERBOSE
     // Sanity check for common error
     if (m->oldToNewPerm[i] >= m->nr) {
       fprintf(stderr,
-          "ERROR matrixConvertMMtoSCS: m->oldToNewPerm[%d]=%d"
-          " is out of bounds (>%d).\n",
-          i,
-          m->oldToNewPerm[i],
-          m->nr);
+          "ERROR matrixConvertMMtoSCS: m->oldToNewPerm[%llu]=%llu"
+          " is out of bounds (>%llu).\n",
+          (unsigned long long)i,
+          (unsigned long long)m->oldToNewPerm[i],
+          (unsigned long long)m->nr);
     }
 #endif
     m->newToOldPerm[m->oldToNewPerm[i]] = (CG_UINT)i;
@@ -167,7 +162,7 @@ void convertMatrix(Matrix *m, GMatrix *im)
 
 // Initialize defaults (essential for padded elements)
 #pragma omp parallel for schedule(OMP_SCHEDULE)
-  for (int c = 0; c < m->nChunks; ++c) {
+  for (CG_UINT c = 0; c < m->nChunks; ++c) {
     CG_UINT start = m->chunkPtr[c];
     CG_UINT end   = m->chunkPtr[c + 1];
     for (CG_UINT j = start; j < end; ++j) {
@@ -177,24 +172,25 @@ void convertMatrix(Matrix *m, GMatrix *im)
   }
 
   // (Temporary array) Keep track of how many elements we've seen in each row
-  int *rowLocalElemCount = (int *)allocate(ARRAY_ALIGNMENT, m->nrPadded * sizeof(int));
-  for (int i = 0; i < m->nrPadded; ++i) {
+  CG_UINT *rowLocalElemCount =
+      (CG_UINT *)allocate(ARRAY_ALIGNMENT, m->nrPadded * sizeof(CG_UINT));
+  for (CG_UINT i = 0; i < m->nrPadded; ++i) {
     rowLocalElemCount[i] = 0;
   }
 
   NVTX_RANGE_PUSH_C("Convert.SCS.scatter", NVTX_C_CONVERT);
-  for (int i = 0; i < m->nr; i++) {
+  for (CG_UINT i = 0; i < m->nr; i++) {
 
-    int rowOld = i;
+    CG_UINT rowOld = i;
 
-    for (int j = rowPtr[i]; j < rowPtr[i + 1]; j++) {
-      Entry e        = im->entries[j];
+    for (CG_UINT j = rowPtr[i]; j < rowPtr[i + 1]; j++) {
+      Entry e            = im->entries[j];
 
-      int row        = m->oldToNewPerm[rowOld];
-      int chunkIdx   = row / m->C;
-      int chunkStart = m->chunkPtr[chunkIdx];
-      int chunkRow   = row % m->C;
-      int idx        = chunkStart + rowLocalElemCount[row] * m->C + chunkRow;
+      CG_UINT row        = m->oldToNewPerm[rowOld];
+      CG_UINT chunkIdx   = row / m->C;
+      CG_UINT chunkStart = m->chunkPtr[chunkIdx];
+      CG_UINT chunkRow   = row % m->C;
+      CG_UINT idx        = chunkStart + rowLocalElemCount[row] * m->C + chunkRow;
 
       // Only permute local column indices; external columns (from MPI
       // localization) live beyond nr and must not be permuted.
@@ -207,11 +203,11 @@ void convertMatrix(Matrix *m, GMatrix *im)
       // Sanity check for common error
       if (m->colInd[idx] >= m->nc) {
         fprintf(stderr,
-            "ERROR matrixConvertMMtoSCS: m->colInd[%d]=%d"
-            " is out of bounds (>%d).\n",
-            idx,
-            m->colInd[idx],
-            m->nc);
+            "ERROR matrixConvertMMtoSCS: m->colInd[%llu]=%llu"
+            " is out of bounds (>%llu).\n",
+            (unsigned long long)idx,
+            (unsigned long long)m->colInd[idx],
+            (unsigned long long)m->nc);
       }
 #endif
       m->val[idx] = e.val;
@@ -262,18 +258,19 @@ void MatrixPrint_impl(Matrix *m, FILE *fptr)
     CG_UINT chunkStart = chunkPtr[chunkIdx];
     CG_UINT rowLen     = chunkLens[chunkIdx];
 
-    fprintf(fptr, "row %u:", row);
+    fprintf(fptr, "row %llu:", (unsigned long long)row);
     for (CG_UINT j = 0; j < rowLen; ++j) {
       CG_UINT idx = chunkStart + j * C + chunkRow;
       CG_UINT col = colInd[idx];
       V_ELE v     = val[idx];
 #ifdef USE_COMPLEX
       if (VREAL(v) != 0.0 || VIMAG(v) != 0.0) {
-        fprintf(fptr, " (%u, %.12g+%.12gi)", col, VREAL(v), VIMAG(v));
+        fprintf(
+            fptr, " (%llu, %.12g+%.12gi)", (unsigned long long)col, VREAL(v), VIMAG(v));
       }
 #else
       if (v != 0.0) {
-        fprintf(fptr, " (%u, %.12g)", col, v);
+        fprintf(fptr, " (%llu, %.12g)", (unsigned long long)col, v);
       }
 #endif
     }
@@ -301,7 +298,7 @@ void dumpMatrix(Matrix *m)
   do {                                                                                   \
     fprintf((fp), #field ": ");                                                          \
     for (size_t i = 0; i < (n); ++i) {                                                   \
-      fprintf((fp), "%d, ", (obj)->field[i]);                                            \
+      fprintf((fp), "%llu, ", (unsigned long long)(obj)->field[i]);                      \
     }                                                                                    \
     fprintf((fp), "\n");                                                                 \
   } while (0)
@@ -359,21 +356,21 @@ void spMVM(Matrix *m, const V_ELE *restrict x, V_ELE *restrict y)
   CG_UINT *chunkLens = m->chunkLens;
 
 #pragma omp parallel for schedule(OMP_SCHEDULE)
-  for (int i = 0; i < numChunks; ++i) {
+  for (CG_UINT i = 0; i < numChunks; ++i) {
     V_ELE tmp[C];
-    for (int j = 0; j < C; ++j) {
+    for (CG_UINT j = 0; j < C; ++j) {
       tmp[j] = 0.0;
     }
 
-    int chunkOffset = chunkPtr[i];
-    for (int j = 0; j < chunkLens[i]; ++j) {
+    CG_UINT chunkOffset = chunkPtr[i];
+    for (CG_UINT j = 0; j < chunkLens[i]; ++j) {
       // NOTE: SIMD should be applied here
-      for (int k = 0; k < C; ++k) {
+      for (CG_UINT k = 0; k < C; ++k) {
         tmp[k] += val[chunkOffset + j * C + k] * x[colInd[chunkOffset + j * C + k]];
       }
     }
 
-    for (int j = 0; j < C; ++j) {
+    for (CG_UINT j = 0; j < C; ++j) {
       y[i * C + j] = tmp[j];
     }
   }
@@ -392,27 +389,27 @@ void spMMVM(Matrix *m, const DMatrix *x, DMatrix *y)
   CG_UINT numVecs    = x->nc; // number of vectors in the block
 
 #pragma omp parallel for schedule(OMP_SCHEDULE)
-  for (int i = 0; i < numChunks; ++i) {
+  for (CG_UINT i = 0; i < numChunks; ++i) {
     V_ELE tmp[C * numVecs];
-    for (int j = 0; j < C * numVecs; ++j) {
+    for (CG_UINT j = 0; j < C * numVecs; ++j) {
       tmp[j] = 0.0;
     }
 
-    int chunkOffset = chunkPtr[i];
-    for (int j = 0; j < chunkLens[i]; ++j) {
-      for (int k = 0; k < C; ++k) {
+    CG_UINT chunkOffset = chunkPtr[i];
+    for (CG_UINT j = 0; j < chunkLens[i]; ++j) {
+      for (CG_UINT k = 0; k < C; ++k) {
         CG_UINT col = colInd[chunkOffset + j * C + k];
         V_ELE a     = val[chunkOffset + j * C + k];
 #pragma omp simd
-        for (int v = 0; v < numVecs; ++v) {
+        for (CG_UINT v = 0; v < numVecs; ++v) {
           tmp[k * numVecs + v] += a * x->entries[col * numVecs + v];
         }
       }
     }
 
-    for (int j = 0; j < C; ++j) {
+    for (CG_UINT j = 0; j < C; ++j) {
 #pragma omp simd
-      for (int v = 0; v < numVecs; ++v) {
+      for (CG_UINT v = 0; v < numVecs; ++v) {
         y->entries[(i * C + j) * numVecs + v] = tmp[j * numVecs + v];
       }
     }
@@ -441,38 +438,38 @@ void spMMVMFused(Matrix *m,
   CG_UINT numVecs    = x->nc; // number of vectors in the block
 
 #pragma omp parallel for schedule(OMP_SCHEDULE)
-  for (int i = 0; i < numChunks; ++i) {
+  for (CG_UINT i = 0; i < numChunks; ++i) {
     V_ELE tmp[C * numVecs];
-    for (int j = 0; j < C * numVecs; ++j) {
+    for (CG_UINT j = 0; j < C * numVecs; ++j) {
       tmp[j] = 0.0;
     }
 
-    int chunkOffset = chunkPtr[i];
-    for (int j = 0; j < chunkLens[i]; ++j) {
-      for (int k = 0; k < C; ++k) {
+    CG_UINT chunkOffset = chunkPtr[i];
+    for (CG_UINT j = 0; j < chunkLens[i]; ++j) {
+      for (CG_UINT k = 0; k < C; ++k) {
         CG_UINT col = colInd[chunkOffset + j * C + k];
         V_ELE a     = val[chunkOffset + j * C + k];
 #pragma omp simd
-        for (int v = 0; v < numVecs; ++v) {
+        for (CG_UINT v = 0; v < numVecs; ++v) {
           tmp[k * numVecs + v] += a * x->entries[col * numVecs + v];
         }
       }
     }
 
-    for (int j = 0; j < C; ++j) {
-      CG_UINT row     = (CG_UINT)i * C + (CG_UINT)j;
+    for (CG_UINT j = 0; j < C; ++j) {
+      CG_UINT row     = i * C + j;
       V_ELE *y_row    = &y->entries[row * numVecs];
       V_ELE *p_row    = &p->entries[row * numVecs];
       V_ELE *chunkAcc = &tmp[j * numVecs];
       if (q != NULL) {
         V_ELE *q_row = &q->entries[row * numVecs];
 #pragma omp simd
-        for (int v = 0; v < numVecs; ++v) {
+        for (CG_UINT v = 0; v < numVecs; ++v) {
           y_row[v] = cA * chunkAcc[v] + cP * p_row[v] + cQ * q_row[v];
         }
       } else {
 #pragma omp simd
-        for (int v = 0; v < numVecs; ++v) {
+        for (CG_UINT v = 0; v < numVecs; ++v) {
           y_row[v] = cA * chunkAcc[v] + cP * p_row[v];
         }
       }
@@ -507,26 +504,26 @@ void chebfdOp(Matrix *m,
   CG_UINT numVecs    = w->nc; // number of vectors in the block
 
 #pragma omp parallel for schedule(OMP_SCHEDULE)
-  for (int i = 0; i < numChunks; ++i) {
+  for (CG_UINT i = 0; i < numChunks; ++i) {
     V_ELE tmp[C * numVecs];
-    for (int j = 0; j < C * numVecs; ++j) {
+    for (CG_UINT j = 0; j < C * numVecs; ++j) {
       tmp[j] = 0.0;
     }
 
-    int chunkOffset = chunkPtr[i];
-    for (int j = 0; j < chunkLens[i]; ++j) {
-      for (int k = 0; k < C; ++k) {
+    CG_UINT chunkOffset = chunkPtr[i];
+    for (CG_UINT j = 0; j < chunkLens[i]; ++j) {
+      for (CG_UINT k = 0; k < C; ++k) {
         CG_UINT col = colInd[chunkOffset + j * C + k];
         V_ELE a     = val[chunkOffset + j * C + k];
 #pragma omp simd
-        for (int v = 0; v < numVecs; ++v) {
+        for (CG_UINT v = 0; v < numVecs; ++v) {
           tmp[k * numVecs + v] += a * w->entries[col * numVecs + v];
         }
       }
     }
 
-    for (int j = 0; j < C; ++j) {
-      CG_UINT row     = (CG_UINT)i * C + (CG_UINT)j;
+    for (CG_UINT j = 0; j < C; ++j) {
+      CG_UINT row     = i * C + j;
       V_ELE *w_row    = &w->entries[row * numVecs];
       V_ELE *y_row    = &y->entries[row * numVecs];
       V_ELE *x_row    = &x->entries[row * numVecs];
@@ -534,14 +531,14 @@ void chebfdOp(Matrix *m,
       if (q != NULL) {
         V_ELE *q_row = &q->entries[row * numVecs];
 #pragma omp simd
-        for (int v = 0; v < numVecs; ++v) {
+        for (CG_UINT v = 0; v < numVecs; ++v) {
           V_ELE t  = cA * chunkAcc[v] + cP * w_row[v] + cQ * q_row[v];
           y_row[v] = t;
           x_row[v] += gc * t;
         }
       } else {
 #pragma omp simd
-        for (int v = 0; v < numVecs; ++v) {
+        for (CG_UINT v = 0; v < numVecs; ++v) {
           V_ELE t  = cA * chunkAcc[v] + cP * w_row[v];
           y_row[v] = t;
           x_row[v] += gc * t;

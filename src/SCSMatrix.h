@@ -29,8 +29,8 @@ typedef struct {
 } Matrix;
 
 typedef struct {
-  int index;
-  int count;
+  CG_UINT index;
+  CG_UINT count;
 } SellCSigmaPair;
 
 /* spMMVM (matrix-SCS.c) puts a per-thread `V_ELE tmp[C * blockwidth]` VLA on the

@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #ifdef SCS
 #include "matrix/matrixTests.h"
+#include "matrix/scsReferenceTests.h"
 #endif
 #include "solver/chebFDGershgorinTests.h"
 #include "solver/chebFDStreamTests.h"
@@ -27,6 +28,7 @@ enum { RC_BIT_BASE = __COUNTER__ };
 
 enum {
   RC_MATRIX_TESTS      = RC_BIT,
+  RC_SCS_REFERENCE     = RC_BIT,
   RC_SOLVER_SPMV       = RC_BIT,
   RC_SOLVER_SPMMV      = RC_BIT,
   RC_SOLVER_SPMV_SPLIT = RC_BIT,
@@ -49,6 +51,7 @@ static const struct {
 } suites[] = {
 #ifdef SCS
   { "matrixTests",           matrixTests,           RC_MATRIX_TESTS      },
+  { "scsReferenceTests",     scsReferenceTests,     RC_SCS_REFERENCE     },
 #endif
   // Self-contained and fast, so run it before the data-driven tests
   { "solverTestsSPMVSplit",  solverTestsSPMVSplit,  RC_SOLVER_SPMV_SPLIT },
